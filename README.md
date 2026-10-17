@@ -14,6 +14,8 @@ It is grounded in the [**d2r-mobile**](https://github.com/jhaizhou-ops/d2r-mobil
 it includes a file-by-file *engine vs title-specific* reuse map and the list of game-specific
 defaults you must turn off first.
 
+中文：[README.zh-CN.md](README.zh-CN.md)
+
 ## Contents
 
 | File | Covers |
