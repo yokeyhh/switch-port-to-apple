@@ -44,7 +44,7 @@ cp -R switch-port-to-apple ~/.config/opencode/skills/
 {
   "$schema": "https://opencode.ai/config.json",
   "skills": [
-    "https://raw.githubusercontent.com/yokeyh/switch-port-to-apple/main/"
+    "https://raw.githubusercontent.com/yokeyhh/switch-port-to-apple/main/"
   ]
 }
 ```
@@ -54,7 +54,7 @@ OpenCode 会读取该基址下的 `index.json`，再从 `<基址>/<技能名>/<�
 ### 3. 克隆
 
 ```sh
-git clone https://github.com/yokeyh/switch-port-to-apple.git
+git clone https://github.com/yokeyhh/switch-port-to-apple.git
 ```
 
 ## 范围与实话

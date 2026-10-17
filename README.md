@@ -45,7 +45,7 @@ Add this repo as a skills source in any `opencode.jsonc`:
 {
   "$schema": "https://opencode.ai/config.json",
   "skills": [
-    "https://raw.githubusercontent.com/yokeyh/switch-port-to-apple/main/"
+    "https://raw.githubusercontent.com/yokeyhh/switch-port-to-apple/main/"
   ]
 }
 ```
@@ -56,7 +56,7 @@ OpenCode reads `index.json` at that base URL and downloads each skill's files fr
 ### 3. Clone
 
 ```sh
-git clone https://github.com/yokeyh/switch-port-to-apple.git
+git clone https://github.com/yokeyhh/switch-port-to-apple.git
 ```
 
 ## Scope and honesty
