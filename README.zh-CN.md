@@ -28,12 +28,41 @@ Switch 版，MIT）为依据，并按**可复用到其它游戏**来写：包含
 
 `references/shader-banks.zh-CN.md` 是同一篇的中文版。
 
-## v2 新增
+## v2 / v3 新增
 
-- **D2R 之外的着色器包。** 新增一篇参考：面向用 `BNSH` 包（`nn::gfx`）发着色器、而不是
-  已经切好单程序包的作品——怎么把 NVN 程序切出来、`c1`（`BRX` 跳转表）到底在哪（代码段末尾）、
+- **v3 —— 可运行的工具。** `scripts/` 不再只是文档，而是整条流水线：切包、生成作业、
+  `c1` 抽取/校验、SPIR-V → metallib、反射统计。不含任何游戏数据，全部跑在你自己那份文件上。
+- **v2 —— D2R 之外的着色器包。** 面向用 `BNSH` 包（`nn::gfx`）发着色器、而不是已经切好
+  单程序包的作品——怎么把 NVN 程序切出来、`c1`（`BRX` 跳转表）到底在哪（代码段末尾）、
   怎么不靠猜地定位、怎么用四条独立校验确认它，以及为什么翻译器必须带 `debug: true`
   （AST 优化器会让这类程序里约 43% 翻不出来）。中英双版。
+
+## 工具
+
+`switch-port-to-apple/scripts/` 是上面那篇参考的可运行配套。需要 Python 3.9+，不用第三方库；
+`shader_chain.py` 另外要 `spirv-cross` 和 Xcode 的 Metal 工具链。
+
+| 脚本 | 作用 |
+|---|---|
+| `bnsh.py` | 读 `BNSH` 包、列程序、导出成 `<bank>.<idx>.<stage>.code` |
+| `dmsh_jobs.py` | 生成 `dmsh_xlate` 的作业 JSON（带不带 `c1` 都行） |
+| `c1_extract.py` | 定位 `BRX` 跳转表的 run，输出补好基址的 `c1` blob |
+| `c1_verify.py` | 四条独立校验（有失败则退出码非 0） |
+| `shader_chain.py` | SPIR-V → MSL → `.metallib`（或 `--msl-only`） |
+| `refl_stats.py` | 汇总 `*.res.json` 反射，给出槽位/格式/贴图统计 |
+
+```sh
+scripts/bnsh.py dump  shader.bnsh work/code
+scripts/dmsh_jobs.py  work/code --out work/jobs_noc1.json
+#   先翻译一遍，再从 note 里读 'c1 读越界'：
+scripts/c1_extract.py work/out_noc1 --code work/code --out work/c1.json --junk-out work/junk.json
+scripts/c1_verify.py  work/c1.json --code work/code --notes work/out_noc1
+scripts/dmsh_jobs.py  work/code --c1 work/c1.json --out work/jobs_c1.json
+#   再翻译一遍，然后：
+scripts/shader_chain.py work/out_c1 work/mlib --jobs 10
+```
+
+完整顺序（含第二轮抽取）见 `switch-port-to-apple/scripts/README.md`。
 
 ## 安装
 
@@ -69,8 +98,8 @@ git clone https://github.com/yokeyhh/switch-port-to-apple.git
 
 ## 范围与实话
 
-- 本技能**只是文档**，不含**任何**游戏代码、美术、文本、数据表或着色器，也不下载任何这些内容。
-  它描述的一切都从**你自己合法拥有**的游戏文件、在你自己的机器上生成。
+- 本技能是**文档 + 少量通用工具**，不含**任何**游戏代码、美术、文本、数据表或着色器，也不下载任何
+  这些内容。它描述的一切都从**你自己合法拥有**的游戏文件、在你自己的机器上生成。
 - 这套方法的前提是源程序与 Apple 芯片**同为 arm64** 指令集、且图形接口是 **NVN**；
   非 arm64 的源（那些需要模拟）**不适用**。
 - 它是 d2r-mobile 方法的知识沉淀。代码的权威来源是

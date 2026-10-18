@@ -10,6 +10,9 @@ per-program data the translation chain needs but cannot infer — the `c1` **ind
 table**. Measured on a real `nn::gfx` title (4,298 programs, 88 banks); the numbers are given as
 sanity anchors, not as assumptions.
 
+Runnable companions: `scripts/bnsh.py` (slicing), `scripts/c1_extract.py` / `scripts/c1_verify.py`
+(the table), `scripts/dmsh_jobs.py` (job file), `scripts/shader_chain.py` (SPIR-V → metallib).
+
 ## `BNSH` layout
 
 ```
@@ -77,13 +80,21 @@ shader that takes the wrong branch (a loop that never exits, in the worst case).
 | Source | Fact |
 |---|---|
 | `Decoders/Decoder.cs` `FindBrxTargetRange` | the site must be preceded by `IMNMX.U32 Rx,Rx,UpperBound,PT` → `SHL Rx,Rx,2` → `LDC Rx,c[1][Rx+BaseOffset]`; **count = UpperBound + 1**, **table base = the LDC's `CbufOffset`** |
-| `Decoders/Decoder.cs` `FindBrxTargets` | `base = BRX address + sign_extend(imm12) + 8`; `target = base + c1[BaseOffset + i*4]` |
-| `Decoders/InstOp.cs`, decoder loop | addresses are in **bytes** and advance by 8 per instruction |
+| `Decoders/Decoder.cs` `FindBrxTargets` | `target = base + c1[BaseOffset + i*4]`; `base` comes from the BRX's `GetAbsoluteAddress()` |
+| `Decoders/InstOp.cs` `GetAbsoluteAddress` | `base = address + (((int)(RawOpCode >> 20) << 8) >> 8) + 8` — C# 32-bit shift arithmetic, **not** the 12-bit sign extension it looks like |
+| decoder loop | addresses are in **bytes**, advance by 8 per instruction, and are 0-based (0 = first instruction = file offset `0x50`) |
 
-So each `c1` word is a **byte offset added to `base`**, which is why every entry is non-zero and a
-multiple of 8. The compiler picks the immediate so that `base` lands somewhere convenient: measured
-on 1,095 sites, most encode `base = 0x50` (start of the instruction region); the rest use
-`0x1050` / `0x2050` / … (a different fixed anchor, same table).
+Measured across **1,739 BRX sites: `base` is 0 for every one.** The compiler encodes the immediate
+field so that it cancels the instruction address, so each `c1` word is an **absolute address in the
+code array**, and in the exported file a target is simply `0x50 + word`. That is also why every entry
+is non-zero, 8-aligned, and smaller than the table start. Do not decode that field by hand — treat
+`base` as 0 and let the landing check below prove it per program.
+
+Two offsets are easy to conflate here:
+
+- **`CbufOffset`** (from the `LDC`) says *where inside the c1 buffer* the table sits. Pad the c1 blob
+  with that many zero bytes.
+- **the target base** added to each table word is 0 (measured), i.e. words are code addresses.
 
 ### Where the table lives
 
@@ -114,9 +125,13 @@ Two traps that cost real time:
   Take the **run start**, not a position inside the run.
 - **Do not assume the table is flush with the end of the record.** Constants follow it, and they
   can look table-ish: `0x4000` is 8-aligned and small, a lone conforming word after a float. Use
-  the run's end, not the file's end.
+  the run's end as an upper bound, then keep only `count * 4` bytes from `T`. This is not
+  theoretical — 10 of 843 runs on the reference title ended with a trailing `0x4000`, and keeping
+  it made the landing check fail.
 
-A minimal extractor, given the count (see "two-pass" below):
+A minimal extractor, given the count (see "two-pass" below). The runnable version is
+`scripts/c1_extract.py` — same algorithm plus note parsing, base padding and a `--junk-out` control
+mode; the excerpt below is just the core:
 
 ```python
 def conf(v):                      # a plausible table entry
@@ -143,6 +158,9 @@ def find_table(buf, need):
 leftwards over zeros so that the start still satisfies the 16-byte congruence. On this title no
 table did.)
 
+`find_table` returns the run, not the table length. Keep only `count * 4` bytes from `T` when you
+build the blob; the run may include following constants.
+
 ### Getting `base` and `count` for free
 
 You do not need a Maxwell decoder to learn what each site reads. Run the translator once **without**
@@ -152,8 +170,8 @@ numbers per program:
 - `count = (max(OFF) − min(OFF)) / 4 + 1`
 - `base   = min(OFF)`
 
-That `base` is the `CbufOffset` the decoder recovered, so the table must sit at that offset of the
-blob you hand back:
+That `base` is the LDC's `CbufOffset` — **where the table sits in the c1 buffer**, not the target base
+(which is 0). The table must sit at that offset of the blob you hand back:
 
 ```python
 job["c1"] = (b"\0" * base + table_bytes).hex()
@@ -175,7 +193,7 @@ Run all four; each is independent of the locating rules:
 |---|---|
 | all read offsets < `len(c1)` | a short table / wrong run end |
 | `T % 32 == 16` | an 8-byte shift inside the run |
-| `0x50 + entry ∈ [0x50, T)` for every entry of the first table | values taken from constants instead of the table |
+| `0x50 + entry ∈ [0x50, T)` for every entry | a constant after the table (`0x4000`) slipped in, or the run started mid-table |
 | every entry non-zero and `% 8 == 0` | a float or a padding word slipped in |
 
 And one behavioural control, because "the shader got bigger" alone proves nothing: translate the
@@ -194,6 +212,7 @@ the junk one resolves a single target.
 
 `dmsh_xlate` already accepts `"c1"` as a hex string per job entry (`Program.cs` `Accessor`), so
 nothing in the chain changes: `{key, stage, code, tex, img, attr, fout, local, debug, reduced, c1}`.
+`scripts/dmsh_jobs.py` writes that array for a whole directory of `.code` files.
 Two things to keep in mind:
 
 - **`debug: true` is mandatory for titles like this.** With the AST optimizer enabled, 43% of the

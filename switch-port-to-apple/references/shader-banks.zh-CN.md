@@ -8,6 +8,9 @@ Maxwell 指令。但基于任天堂自家 `nn::gfx` 的游戏不是这样——�
 ——`c1` **间接跳转表**——喂进去。数据取自一个真实的 `nn::gfx` 作品（88 个包、4,298 个程序）；
 下面的数字只当量级参照，不要当假设。
 
+可运行版本：`scripts/bnsh.py`（切程序）、`scripts/c1_extract.py` / `scripts/c1_verify.py`
+（跳转表）、`scripts/dmsh_jobs.py`（作业文件）、`scripts/shader_chain.py`（SPIR-V → metallib）。
+
 ## `BNSH` 布局
 
 ```
@@ -71,12 +74,18 @@ Maxwell 指令。但基于任天堂自家 `nn::gfx` 的游戏不是这样——�
 | 位置 | 事实 |
 |---|---|
 | `Decoders/Decoder.cs` `FindBrxTargetRange` | BRX 前必须是 `IMNMX.U32 Rx,Rx,UpperBound,PT` → `SHL Rx,Rx,2` → `LDC Rx,c[1][Rx+BaseOffset]`；**条数 = UpperBound + 1**，**表基址 = LDC 的 `CbufOffset`** |
-| `Decoders/Decoder.cs` `FindBrxTargets` | `base = BRX 地址 + 符号扩展(imm12) + 8`；`target = base + c1[BaseOffset + i*4]` |
-| `Decoders/InstOp.cs`、解码主循环 | 地址单位是**字节**，每条指令 +8 |
+| `Decoders/Decoder.cs` `FindBrxTargets` | `target = base + c1[BaseOffset + i*4]`；`base` 来自 BRX 的 `GetAbsoluteAddress()` |
+| `Decoders/InstOp.cs` `GetAbsoluteAddress` | `base = address + (((int)(RawOpCode >> 20) << 8) >> 8) + 8` —— C# 的 32 位移位算术，**不是**看着像的 12 位符号扩展 |
+| 解码主循环 | 地址单位是**字节**，每条指令 +8，且是 0 起算（0 = 第一条指令 = 文件偏移 `0x50`） |
 
-所以 `c1` 里每个字都是**加到 `base` 上的字节偏移**，这就是为什么每条都非 0、且是 8 的倍数。
-立即数由编译器挑，好让 `base` 落在方便的地方：实测 1,095 个站点里多数直接编成 `base = 0x50`
-（指令区起点），其余用 `0x1050` / `0x2050` / …（换一个固定锚点，表还是那张）。
+实测 **1,739 个 BRX 站点，`base` 全是 0**。编译器把那个立即数字段编成恰好抵消指令地址，所以 `c1`
+里的每个字都是**代码区里的绝对地址**；在导出文件里，目标就是 `0x50 + 字`。这也解释了为什么每条
+都非 0、8 对齐、且小于表起点。不要去手推那个字段——把 `base` 当 0，用下面的落点校验逐个程序验证。
+
+这里有两个容易混的偏移：
+
+- **`CbufOffset`**（来自 `LDC`）说的是表在 **c1 缓冲里的位置**：给 blob 前面补这么多零字节。
+- **加到每个表字上的目标基址**是 0（实测），也就是说表字本身就是代码地址。
 
 ### 表在哪
 
@@ -102,9 +111,12 @@ Maxwell 指令。但基于任天堂自家 `nn::gfx` 的游戏不是这样——�
   位置一大把、相隔 4 条；从末尾往回搜会挑到**run 中间**，于是每个 case 静默错位 4~5 条。
   要取 **run 的起点**，不要取 run 里的某个位置。
 - **不要假设表顶到代码段末尾。** 后面还跟着常量，而且它们长得很像表项：`0x4000` 就是 8 对齐、
-  又小，孤零零地跟在一个浮点数后面。用 run 的末尾，不要用文件的末尾。
+  又小，孤零零地跟在一个浮点数后面。把 run 的末尾当**上界**，然后只从 `T` 起保留 `count * 4`
+  字节。这不是纸上谈兵——参考作品里 843 张表中有 10 张的 run 末尾就多吞了一个 `0x4000`，
+  留着它会让落点校验挂掉。
 
-给定条数（见下面"两遍收敛"）的最小提取器：
+给定条数（见下面"两遍收敛"）的最小提取器。可运行版本是 `scripts/c1_extract.py`——同一个算法，
+外加 note 解析、按基址补零和 `--junk-out` 对照模式；下面是核心部分：
 
 ```python
 def conf(v):                      # 像不像一个表项
@@ -130,6 +142,9 @@ def find_table(buf, need):
 （如果表可能以 0 开头——`default` 分支落到 `base`——就允许往左吞掉紧邻的 0，只要起点仍满足
 16 字节同余。这个作品里没有一张表这样。）
 
+`find_table` 返回的是 run，不是表的长度。拼 blob 时只从 `T` 起保留 `count * 4` 字节——run 可能
+把后面的常量也吞进来。
+
 ### 白拿 `base` 和 `count`
 
 不需要写 Maxwell 解码器就能知道每个站点读了什么。先**不喂** `c1` 跑一遍翻译器：它的 accessor 会把
@@ -138,7 +153,8 @@ def find_table(buf, need):
 - `count = (max(OFF) − min(OFF)) / 4 + 1`
 - `base   = min(OFF)`
 
-这个 `base` 就是解码器解出来的 `CbufOffset`，所以表必须放在你回填的 blob 的这个偏移上：
+这个 `base` 是 `LDC` 的 `CbufOffset`——**表在 c1 缓冲里的位置**，不是上面那个目标基址（那是 0）。
+表必须放在你回填的 blob 的这个偏移上：
 
 ```python
 job["c1"] = (b"\0" * base + table_bytes).hex()
@@ -159,7 +175,7 @@ job["c1"] = (b"\0" * base + table_bytes).hex()
 |---|---|
 | 所有读偏移 < `len(c1)` | 表太短 / run 末尾取错 |
 | `T % 32 == 16` | 在 run 里偏了 8 字节 |
-| 第一张表每条都满足 `0x50 + 表项 ∈ [0x50, T)` | 值取到了常量区而不是表里 |
+| 每条都满足 `0x50 + 表项 ∈ [0x50, T)` | 混进了表后的常量（`0x4000`），或 run 从表中间开始 |
 | 每条非 0 且 `% 8 == 0` | 混进了浮点数或填充字 |
 
 再加一个**行为对照**，因为"shader 变大了"本身什么都证明不了：把同一批程序用**等长垃圾 `c1`**
@@ -177,6 +193,7 @@ job["c1"] = (b"\0" * base + table_bytes).hex()
 
 `dmsh_xlate` 本来就支持每个作业条目带 `"c1"`（hex 字符串，见 `Program.cs` 的 `Accessor`），
 所以链路一行都不用改：`{key, stage, code, tex, img, attr, fout, local, debug, reduced, c1}`。
+`scripts/dmsh_jobs.py` 可以为一整个目录的 `.code` 生成这个数组。
 两点注意：
 
 - **这类作品的 `debug: true` 是必须的。** 开着 AST 优化器时 43% 的程序在 `GenerateCall` 里崩

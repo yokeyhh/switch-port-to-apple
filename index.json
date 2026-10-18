@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "switch-port-to-apple",
-      "version": "2",
+      "version": "3",
       "files": [
         "SKILL.md",
         "references/architecture.md",
@@ -10,7 +10,14 @@
         "references/build-pipeline.md",
         "references/pitfalls.md",
         "references/shader-banks.md",
-        "references/shader-banks.zh-CN.md"
+        "references/shader-banks.zh-CN.md",
+        "scripts/README.md",
+        "scripts/bnsh.py",
+        "scripts/c1_extract.py",
+        "scripts/c1_verify.py",
+        "scripts/dmsh_jobs.py",
+        "scripts/shader_chain.py",
+        "scripts/refl_stats.py"
       ]
     }
   ]

@@ -63,10 +63,11 @@ These do not fail the build. They produce a library that loads fine and renders 
   Consequence: don't "optimize" the translate step by turning debug off — measure first.
 - **`c1` is the `BRX` jump table, and it lives at the tail of the code segment.** It is *not* the
   `0x880` control-record payload, and it is *not* "the 0x100 bytes before the control section" (that
-  D2R-era rule is a property of D2R's container, not of NVN). Search the code segment
-  `[0x80:]`, take a conforming run's **start**, require `(T − 0x80) % 16 == 0`, and let the
-  translator's out-of-range notes tell you the table base and count. Full algorithm and the four
-  independent checks: `references/shader-banks.md`.
+  D2R-era rule is a property of D2R's container, not of NVN). In the exported code file (SPH first),
+  search `[0x50:]`, take a conforming run's **start**, require `(T − 0x50) % 16 == 0`, and keep only
+  as many entries as the translator actually reads (a run can swallow the trailing `0x4000`
+  constant). Entries are absolute code addresses (`0x50 + word`), not offsets from a large base.
+  Full algorithm, the four independent checks and a control experiment: `references/shader-banks.md`.
 - **A long `c1` run has conforming positions inside it.** Tables for several `BRX` sites are
   concatenated, so scanning backwards for "an aligned position whose next N words look like a table"
   selects a **mid-run** start and shifts every case by 4–5 entries. Take the run start. Likewise, do

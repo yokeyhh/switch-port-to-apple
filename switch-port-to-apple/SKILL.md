@@ -25,6 +25,7 @@ Read this page first; it is the map. Load the reference files it points at when 
 | `references/build-pipeline.md` | Workspace setup, Mac/iOS builds, artifacts, signing, pushing game data |
 | `references/pitfalls.md` | The traps that cost real time (AAPCS64, no-JIT, BC textures, version drift) |
 | `references/shader-banks.md` | When shaders arrive in `BNSH` banks instead of a per-program package: slicing NVN programs out, and the `c1` BRX jump table (`shader-banks.zh-CN.md` for the Chinese text) |
+| `scripts/` | Runnable tools for that path — `bnsh.py`, `c1_extract.py`, `c1_verify.py`, `dmsh_jobs.py`, `shader_chain.py`, `refl_stats.py` (see `scripts/README.md`) |
 
 ## When this approach applies
 
@@ -88,7 +89,8 @@ default**. Expect to turn those off first. The order that works:
    (`setup.sh` does it) to produce `<key>_b.metallib` + `_b.json` for every shader the game uses.
    If the title ships `BNSH` banks rather than an extracted package, you also have to slice the NVN
    programs out and supply the `c1` BRX jump table — `references/shader-banks.md`, and pass
-   `debug: true` to the translator or ~43% of the programs fail.
+   `debug: true` to the translator or ~43% of the programs fail. `scripts/` has runnable tools for
+   every step (`bnsh.py` → `dmsh_jobs.py` → `c1_extract.py` → `c1_verify.py` → `shader_chain.py`).
 7. **Repoint the shell** at the new ExeFS/RomFS and verify with the repo's verification tools.
 
 Full detail for each step is in the reference files.
