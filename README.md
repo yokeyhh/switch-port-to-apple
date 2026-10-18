@@ -25,6 +25,17 @@ defaults you must turn off first.
 | `references/code-reuse-map.md` | Every directory/file classified **ENGINE / ADAPT / TITLE** |
 | `references/build-pipeline.md` | Workspace setup, Mac/iOS builds, artifacts, signing, pushing game data to the device |
 | `references/pitfalls.md` | AAPCS64 vs Switch ABI, no-JIT signing rules, BC textures, version drift, and more |
+| `references/shader-banks.md` | `BNSH` shader banks: slicing NVN programs out, and the `c1` `BRX` jump table (layout, extraction, verification) |
+
+The last one is in Chinese too: `references/shader-banks.zh-CN.md`.
+
+## New in v2
+
+- **Shader banks beyond D2R.** A new reference covers titles that ship shaders as `BNSH` banks
+  (`nn::gfx`) rather than a pre-extracted per-program package: how to slice the NVN programs out,
+  where the `c1` `BRX` jump table actually lives (tail of the code segment), how to locate it without
+  guessing, how to verify it with four independent checks, and why the translator must be run with
+  `debug: true` (the AST optimizer breaks ~43% of such programs). Chinese text included.
 
 ## Install
 

@@ -24,6 +24,7 @@ Read this page first; it is the map. Load the reference files it points at when 
 | `references/code-reuse-map.md` | Every directory/file classified as reusable engine vs title-specific |
 | `references/build-pipeline.md` | Workspace setup, Mac/iOS builds, artifacts, signing, pushing game data |
 | `references/pitfalls.md` | The traps that cost real time (AAPCS64, no-JIT, BC textures, version drift) |
+| `references/shader-banks.md` | When shaders arrive in `BNSH` banks instead of a per-program package: slicing NVN programs out, and the `c1` BRX jump table (`shader-banks.zh-CN.md` for the Chinese text) |
 
 ## When this approach applies
 
@@ -85,6 +86,9 @@ default**. Expect to turn those off first. The order that works:
    game actually calls (start from what the red stubs report).
 6. **Regenerate the shader set**: the shader package is per-title; run the translation chain
    (`setup.sh` does it) to produce `<key>_b.metallib` + `_b.json` for every shader the game uses.
+   If the title ships `BNSH` banks rather than an extracted package, you also have to slice the NVN
+   programs out and supply the `c1` BRX jump table — `references/shader-banks.md`, and pass
+   `debug: true` to the translator or ~43% of the programs fail.
 7. **Repoint the shell** at the new ExeFS/RomFS and verify with the repo's verification tools.
 
 Full detail for each step is in the reference files.

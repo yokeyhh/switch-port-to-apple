@@ -23,7 +23,17 @@ Switch 版，MIT）为依据，并按**可复用到其它游戏**来写：包含
 | `references/architecture.md` | 五层详解——改写表、装载器、HLE 宏、NVN→Metal、着色器翻译链、iOS 外壳 |
 | `references/code-reuse-map.md` | 每个目录/文件按 **ENGINE（引擎）/ ADAPT（需适配）/ TITLE（本作专属）** 分类 |
 | `references/build-pipeline.md` | 工作区准备、Mac/iOS 构建、产物、签名、往设备推游戏数据 |
-| `references/pitfalls.md` | AAPCS64 与 Switch 的 ABI 差异、无 JIT 的签名规则、BC 纹理、版本漂移等 |
+| `references/pitfalls.md` | AAPCS64 与 Switch 的 ABI 差异、无 JIT 的签名规则、BC 纹理、版本漂移、着色器链的静默错误等 |
+| `references/shader-banks.md` | `BNSH` 着色器包：怎么切出 NVN 程序，以及 `c1`（`BRX` 跳转表）的布局、提取与校验 |
+
+`references/shader-banks.zh-CN.md` 是同一篇的中文版。
+
+## v2 新增
+
+- **D2R 之外的着色器包。** 新增一篇参考：面向用 `BNSH` 包（`nn::gfx`）发着色器、而不是
+  已经切好单程序包的作品——怎么把 NVN 程序切出来、`c1`（`BRX` 跳转表）到底在哪（代码段末尾）、
+  怎么不靠猜地定位、怎么用四条独立校验确认它，以及为什么翻译器必须带 `debug: true`
+  （AST 优化器会让这类程序里约 43% 翻不出来）。中英双版。
 
 ## 安装
 

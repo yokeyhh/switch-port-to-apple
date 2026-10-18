@@ -52,6 +52,27 @@ The three files `setup.sh` rewrites with your local tool fingerprints
 - A different Xcode or `spirv-cross` than the lock file is normal; `setup.sh` re-registers and
   produces libraries for *your* tools, and the host then accepts only that version.
 
+## Shader chain: three silent-wrong traps
+
+These do not fail the build. They produce a library that loads fine and renders wrong.
+
+- **`debug: true` is mandatory on titles with switch-heavy shaders.** It is the translator's
+  `DebugMode` flag, i.e. it *skips* the AST optimizer. With the optimizer on, ~43% of programs throw
+  in `GenerateCall`: it rewrites call arguments into `AstTextureOperation`, and SPIR-V codegen casts
+  them back to `AstOperand`. The remaining programs still translate, so a spot check passes.
+  Consequence: don't "optimize" the translate step by turning debug off — measure first.
+- **`c1` is the `BRX` jump table, and it lives at the tail of the code segment.** It is *not* the
+  `0x880` control-record payload, and it is *not* "the 0x100 bytes before the control section" (that
+  D2R-era rule is a property of D2R's container, not of NVN). Search the code segment
+  `[0x80:]`, take a conforming run's **start**, require `(T − 0x80) % 16 == 0`, and let the
+  translator's out-of-range notes tell you the table base and count. Full algorithm and the four
+  independent checks: `references/shader-banks.md`.
+- **A long `c1` run has conforming positions inside it.** Tables for several `BRX` sites are
+  concatenated, so scanning backwards for "an aligned position whose next N words look like a table"
+  selects a **mid-run** start and shifts every case by 4–5 entries. Take the run start. Likewise, do
+  not assume the table ends at the file end — uniform constants (`0x3f555556`, `0x4000`, …) follow it
+  and `0x4000` passes a naive "8-aligned, small, non-zero" test.
+
 ## Graphics: device and OS splits
 
 - **BC-compressed textures.** Apple GPUs from **A16 and earlier** do not support BC. Those devices

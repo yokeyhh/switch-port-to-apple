@@ -202,6 +202,17 @@ Switch shader package
                                                                ship MSL as source, compile once on device)
 ```
 
+Two inputs are easy to get wrong before the chain even runs:
+
+- **Input shape.** `dmsh_xlate` wants one program per blob, starting at the **SPH** (0x50 bytes) and
+  followed by Maxwell instructions. Titles on Nintendo's own `nn::gfx` ship `BNSH` **shader banks**
+  instead: you must slice each program out (`0x30`-byte NVN header + SPH + code). See
+  `references/shader-banks.md`.
+- **`c1`.** A shader that lowers a `switch` to `BRX` reads its jump table from constant bank 1. The
+  table is not in the control section — it sits at the **tail of the code segment**. Without it the
+  switch bodies are silently dropped (no error, just a wrong CFG). `references/shader-banks.md`
+  covers the layout, the two-pass extraction and the verification.
+
 - **Key**: first 16 hex digits of `sha256(shader control section, 0x880 bytes)`. At run time the game
   hands the control section to `nvnProgramSetShaders`; the replay layer computes the same key.
 - **Build outputs**: `<key>_b.metallib`, `<key>_b.json` (reflection: binding kind, slot, argument-buffer
@@ -217,9 +228,11 @@ Switch shader package
   json — mismatch = red, no load. So: change any chain file/tool → rebuild libraries **and**
   recompile the host.
   `dmsh_chain.py` prints `V`; `--check-tools`; `--update-lock`; `--header`.
-- **`nvn/c1_full.tsv`**: shader keys whose c1 (built-in constant) run-time index could not be proven
-  bounded (`tools/c1_guard.py`). Those get a dedicated 64 KiB c1 buffer; if the list is missing or
-  version-mismatched the replay layer reports red and conservatively treats *all* shaders that way.
+- **`nvn/c1_full.tsv`**: shader keys whose c1 (built-in constant) *run-time* index could not be
+  proven bounded (`tools/c1_guard.py`). Those get a dedicated 64 KiB c1 buffer; if the list is
+  missing or version-mismatched the replay layer reports red and conservatively treats *all* shaders
+  that way. Do not confuse this with the **translation-time** `c1` input, which is the `BRX` jump
+  table stored in the code segment (`references/shader-banks.md`).
 - **`nvn/pso_manifest.tsv`**: warm-up seed manifest; row order = pre-build order, do not sort.
 - **`nvn/nvn_builtin.h`**: MSL hand-written from disassembly for the 4 compute shaders embedded in
   `main` (not in the shader package).

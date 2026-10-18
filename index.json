@@ -2,13 +2,15 @@
   "skills": [
     {
       "name": "switch-port-to-apple",
-      "version": "1",
+      "version": "2",
       "files": [
         "SKILL.md",
         "references/architecture.md",
         "references/code-reuse-map.md",
         "references/build-pipeline.md",
-        "references/pitfalls.md"
+        "references/pitfalls.md",
+        "references/shader-banks.md",
+        "references/shader-banks.zh-CN.md"
       ]
     }
   ]
