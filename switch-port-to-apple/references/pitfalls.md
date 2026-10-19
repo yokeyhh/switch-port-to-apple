@@ -107,6 +107,18 @@ These do not fail the build. They produce a library that loads fine and renders 
   shader that writes `[[point_size]]` fails if you force `Triangle`. Set the topology from the MSL
   itself (does it declare `[[point_size]]` / `[[render_target_array_index]]`?) rather than one global
   choice, or half the pipelines fail either way.
+- **`[[render_target_array_index]]` needs `renderTargetArrayLength` — or every layer write lands in slice 0.**
+  When the reflection says a stage writes the layer index (NVN's `gl_Layer`; the `rt_array` field), the
+  render pass must span the layer range. Metal's `renderTargetArrayLength` defaults to **1**, so leaving
+  it unset does not error: all instance/layer writes are clamped into slice 0 and slices 1..N keep
+  whatever the texture was created with (usually zero). The failure looks nothing like a layer bug —
+  one real case was a 32³ RGB10A2 colour-grading LUT that got only slice 0 filled, so the tone-mapping
+  pass sampled empty slices, produced an exactly-zero sRGB buffer, and the whole **indoor** scene was
+  black while outdoor and UI rendering were perfect. NVN has no per-RTV layer count: take the range from
+  the texture itself (3D → `depth`, 2D array → `arrayLength`). Set it unconditionally for 3D colour
+  attachments; for 2D arrays only when a stage actually writes the layer index, otherwise a plain clear
+  clears array layers the game never asked for. Make the flag **sticky for the whole pass** — the
+  clear-only and reopen paths must attach the same range the first `rp_begin` did.
 - **Integer attachments reject float fragment outputs.** A pipeline pairing a `float4` fragment
   shader with an `R8Uint` colour attachment fails to create ("output of type float4 is not compatible
   with a MTLPixelFormatR8Uint color attachment"). The shader's output *index* tells you which
@@ -189,3 +201,31 @@ Two traps:
 - Thermal throttling lowers the 3D render scale (log reports 温控 level); the UI is untouched.
 - Sparse frame logs are normal — `帧 N：` lines are periodic, so a "stalled" log usually just means
   nothing worth logging happened, or the app is backgrounded.
+
+## Diagnosing a black (or wrong) scene
+
+"Valid input, black output" is the most common graphics symptom and the least guessable. Reading
+intermediate textures back to the host is far shorter than reasoning about the shaders. Three
+diagnostics carry almost all the weight — build them before you need them:
+
+- **Per-pass attachment read-back** (`DM_NVN_RTSTAT=<frame|from-to>`). At the end of every render pass,
+  copy each colour attachment into a host buffer and print a value-range line (min/max, count of
+  non-empty blocks, count of non-finite pixels). Walking the buffer chain from the geometry pass
+  forward to the swapchain localises the break to **one pass**. Non-finite counts matter: a NaN usually
+  means a `0 × ∞` in the shader, an exact `0` usually means a zeroed input.
+- **Texture dump by serial** (`DM_NVN_TEXDUMP=<frame>:<path>%d.png` + `DM_NVN_TEXRAW=<serial>,…`).
+  Blit-copies the whole texture out — **including 3D and array textures**, which is what lets you see
+  *which slices* an LUT or shadow map actually got. If a multi-slice target has content in slice 0 and
+  zeros elsewhere, stop looking at the shaders.
+- **Output-substitution probe** (`DM_NVN_MAGSCAN=<fragment key>:<every>:<phase length>`). Rotates
+  phases over the run: normal → drop that shader's draws → replace its output with constant grey →
+  replace with constant magenta. If replacing the output turns the black screen **grey**, the draw is
+  rasterising fine and the problem is purely arithmetic; if it stays black, it is culling, a degenerate
+  triangle, or the draw never being encoded. That single step removes half the hypothesis space.
+
+Also cheap and worth having: force the per-binding pass dump on for the first *N* draws of one shader
+key (`DM_NVN_KEYDUMP=<key>:<count>[:<interval>]`) to read the uniform values the game actually wrote at
+gameplay time rather than at boot.
+
+Then check the *reflection*, not the pixels: `rt_array`, `point_size`, integer output formats, and the
+attachment formats are where whole classes of silent-wrong live (§Graphics).
