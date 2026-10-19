@@ -119,6 +119,37 @@ These do not fail the build. They produce a library that loads fine and renders 
   attachments; for 2D arrays only when a stage actually writes the layer index, otherwise a plain clear
   clears array layers the game never asked for. Make the flag **sticky for the whole pass** — the
   clear-only and reopen paths must attach the same range the first `rp_begin` did.
+- **An NVN texture view in `STENCIL` depth-stencil mode samples the *stencil* plane - and Metal cannot
+  sample a stencil plane at all.** `nvnTextureViewSetDepthStencilMode(view, NVN_TEXTURE_DEPTH_STENCIL_MODE_STENCIL)`
+  is the easiest of the view setters to leave unimplemented: `set_format`, `set_target` and `set_swizzle`
+  are obviously visible in the rendered result, this one is not. Recording it and then reading the
+  *depth* plane instead produces a very specific symptom: the shaders that use such a view read the
+  sampled value's **raw bits** (`as_type<uint>` then `extract_bits`, a packed per-pixel byte - bit 6 =
+  "an effect pass owns this pixel", other bit fields = material classes), so the depth's low bits drive
+  `discard_fragment()` and the scene gets **high-frequency stripes along depth contours** (one real
+  case: 49.9% of the pixels had depth bit 6 set, and 38.5% of the scene HDR held exactly the clear
+  value). Confirm it in one dump: `MTLBlitOptionStencilFromDepthStencil` out of the combined
+  depth-stencil texture shows a clean packed mask (`0x00` 23.9% / `0x01` 0.4% / `0x20` 75.7%, bit 6
+  clear everywhere) where the depth plane looks like a smooth depth buffer.
+  The fix is a **mirror**: blit the stencil plane into a buffer, then run your own small compute kernel
+  that writes a sampleable texture. Two details decide whether it works:
+  - **Store `as_type<float>(0x3F800000 | byte)`, not the byte value and not the normalised byte.** Every
+    bit the shader inspects is then the stencil's, the value stays an ordinary ~1.0 float (the byte sits
+    in the mantissa's low bits, so nothing is denormal and can be flushed), and - the reason to prefer
+    this over an `R8Uint` mirror - the **declared type stays `texture2d<float>`**, so there is no
+    undefined pixel-format/type mismatch (bind an integer format to a float-typed argument and the fetch
+    behaviour is not specified).
+  - **Refill it after the pass that stores the stencil**, and force that attachment's store action to
+    `Store` (the redundant-attachment analysis will otherwise pick `DontCare` and the blit reads
+    discarded content). Until the first refill, return a 1x1 "all-zero mask" texture rather than the
+    uninitialised mirror. A pass that writes the stencil *and* samples it as a mask in the same draw
+    still reads the previous content; no game has been seen to do that.
+- **Print the *registered* NVN format and the view flags in your binding dump, not just the resolved
+  Metal format.** One storage can be registered twice, as two texture objects with two different views
+  (the depth and its stencil plane above). If the dump only shows the resolved format (`fmt=260`), both
+  bindings look identical and the bug is invisible; adding `nfmt` / `vfmt` / the `set_*` flags (and
+  especially the depth-stencil mode) makes it one line: `ser=12923 nfmt=0x35 vfmt=0x35 ds=1/1` next to
+  `ser=12923 nfmt=0x35 vfmt=0 ds=0/-1`.
 - **Integer attachments reject float fragment outputs.** A pipeline pairing a `float4` fragment
   shader with an `R8Uint` colour attachment fails to create ("output of type float4 is not compatible
   with a MTLPixelFormatR8Uint color attachment"). The shader's output *index* tells you which
