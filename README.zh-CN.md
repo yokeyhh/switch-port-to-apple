@@ -25,11 +25,16 @@ Switch 版，MIT）为依据，并按**可复用到其它游戏**来写：包含
 | `references/build-pipeline.md` | 工作区准备、Mac/iOS 构建、产物、签名、往设备推游戏数据 |
 | `references/pitfalls.md` | AAPCS64 与 Switch 的 ABI 差异、无 JIT 的签名规则、BC 纹理、版本漂移、着色器链的静默错误等 |
 | `references/shader-banks.md` | `BNSH` 着色器包：怎么切出 NVN 程序，以及 `c1`（`BRX` 跳转表）的布局、提取与校验 |
+| `references/runtime-shaders.md` | 游戏**运行期才构造**的 NVN 程序——宿主把映射表未命中的那些落盘，再用同一条链补进同一个包 |
 
-`references/shader-banks.zh-CN.md` 是同一篇的中文版。
+`references/shader-banks.zh-CN.md` 是 shader-banks 那篇的中文版。
 
-## v2 / v3 新增
+## v2 / v3 / v4 新增
 
+- **v4 —— 运行期构造的着色器。** 光扫 `BNSH` 包并不够：后面的地图、角色、UI 常常是运行期才构造
+  NVN 程序。宿主把映射表未命中的落盘，脚本 `runtime_jobs.py` 把它们翻进**同一个**包。另补了几条
+  `pitfalls.md`：NVN 的 Set/Get 要成对、顶点拓扑要逐支选、整数附件不接受 float 输出，
+  以及怎么无窗口推进游戏。
 - **v3 —— 可运行的工具。** `scripts/` 不再只是文档，而是整条流水线：切包、生成作业、
   `c1` 抽取/校验、SPIR-V → metallib、反射统计。不含任何游戏数据，全部跑在你自己那份文件上。
 - **v2 —— D2R 之外的着色器包。** 面向用 `BNSH` 包（`nn::gfx`）发着色器、而不是已经切好
@@ -46,6 +51,7 @@ Switch 版，MIT）为依据，并按**可复用到其它游戏**来写：包含
 |---|---|
 | `bnsh.py` | 读 `BNSH` 包、列程序、导出成 `<bank>.<idx>.<stage>.code` |
 | `dmsh_jobs.py` | 生成 `dmsh_xlate` 的作业 JSON（带不带 `c1` 都行） |
+| `runtime_jobs.py` | 从宿主的 `DM_NVN_SHDUMP` 目录（`<key>.ctl` + `<key>.code`）生成同一份作业 JSON（运行期构造的程序） |
 | `c1_extract.py` | 定位 `BRX` 跳转表的 run，输出补好基址的 `c1` blob |
 | `c1_verify.py` | 四条独立校验（有失败则退出码非 0） |
 | `shader_chain.py` | SPIR-V → MSL → `.metallib`（或 `--msl-only`） |

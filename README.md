@@ -26,11 +26,16 @@ defaults you must turn off first.
 | `references/build-pipeline.md` | Workspace setup, Mac/iOS builds, artifacts, signing, pushing game data to the device |
 | `references/pitfalls.md` | AAPCS64 vs Switch ABI, no-JIT signing rules, BC textures, version drift, and more |
 | `references/shader-banks.md` | `BNSH` shader banks: slicing NVN programs out, and the `c1` `BRX` jump table (layout, extraction, verification) |
+| `references/runtime-shaders.md` | NVN programs the title builds **at run time** — dumping the misses from the host and packing them with the same chain |
 
-The last one is in Chinese too: `references/shader-banks.zh-CN.md`.
+The `shader-banks` one is in Chinese too: `references/shader-banks.zh-CN.md`.
 
 ## What's new
 
+- **v4 — runtime-constructed shaders.** A bank scan is not the whole set. Titles build programs at run
+  time (later areas, characters, UI); the host dumps the ones missing from the map, and
+  `runtime_jobs.py` translates them into the *same* package. Plus new `pitfalls.md` entries: paired
+  NVN getters, per-shader vertex topology, integer attachments, and advancing a game headlessly.
 - **v3 — runnable tools.** `scripts/` now ships the pipeline instead of only documenting it:
   bank slicing, job JSON, `c1` extraction/verification, SPIR-V → metallib, reflection statistics.
   No game data; everything runs on files from your own copy.
@@ -49,6 +54,7 @@ third-party modules; `shader_chain.py` also needs `spirv-cross` and Xcode's Meta
 |---|---|
 | `bnsh.py` | read a `BNSH` bank, list programs, export each as `<bank>.<idx>.<stage>.code` |
 | `dmsh_jobs.py` | build the `dmsh_xlate` job JSON (with or without `c1`) |
+| `runtime_jobs.py` | build the job JSON from a host `DM_NVN_SHDUMP` directory (runtime-constructed programs) |
 | `c1_extract.py` | locate the `BRX` jump-table runs and emit the padded `c1` blobs |
 | `c1_verify.py` | four independent checks on those blobs (non-zero exit on failure) |
 | `shader_chain.py` | SPIR-V → MSL → `.metallib` (or `--msl-only`) |

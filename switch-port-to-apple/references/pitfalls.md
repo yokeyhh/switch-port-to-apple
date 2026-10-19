@@ -73,6 +73,13 @@ These do not fail the build. They produce a library that loads fine and renders 
   selects a **mid-run** start and shifts every case by 4–5 entries. Take the run start. Likewise, do
   not assume the table ends at the file end — uniform constants (`0x3f555556`, `0x4000`, …) follow it
   and `0x4000` passes a naive "8-aligned, small, non-zero" test.
+- **The key includes the `0x30`/`0x100` stage header.** The host hashes
+  `sha256(control[0:nctl] ‖ code[0:ncode])`, where `code` starts at the stage header — not at the SPH.
+  `nctl` is `min(0x880, u32@control+0x20)`. A key computed another way (e.g. without the header, or
+  a hard-coded `0x880`) will never match the package and every shader "mysteriously" misses.
+- **A bank is not the whole shader set.** Later areas, characters and menus often build NVN programs
+  at run time. Expect to dump them from the host and pack them with the same chain —
+  `references/runtime-shaders.md`.
 
 ## Graphics: device and OS splits
 
@@ -90,6 +97,31 @@ These do not fail the build. They produce a library that loads fine and renders 
 - Some NVN paths are unimplemented by design (mid-pass clears, indexed quads, 8-bit indices, some
   texture copies/clears) and report red; `g_nops` functions (e.g. `MultiDraw*IndirectCount`,
   `DispatchComputeIndirect`, `SetDepthBounds`) are silent no-ops.
+- **Implement every `Get` that pairs a `Set`.** Titles read state back and reuse it (channel mask,
+  depth-stencil, multisample, polygon, color/alpha-ref, vertex-attrib/stream). A getter left as a
+  zero-returning stub does not just log — it makes the game build a *different* pipeline than it
+  intended, and the log floods with one red line per draw. Mirror the SDK's object layouts
+  (`nvn_obj.h` in nxnative) and the log goes quiet.
+- **Vertex topology is per-shader, not global.** A vertex shader that writes
+  `render_target_array_index` needs a Metal `inputPrimitiveTopology` other than `Unspecified`; but a
+  shader that writes `[[point_size]]` fails if you force `Triangle`. Set the topology from the MSL
+  itself (does it declare `[[point_size]]` / `[[render_target_array_index]]`?) rather than one global
+  choice, or half the pipelines fail either way.
+- **Integer attachments reject float fragment outputs.** A pipeline pairing a `float4` fragment
+  shader with an `R8Uint` colour attachment fails to create ("output of type float4 is not compatible
+  with a MTLPixelFormatR8Uint color attachment"). The shader's output *index* tells you which
+  attachment: a mismatch here is usually an attachment-binding/format bug in the replay layer, not a
+  game bug, and it shows up as a skipped pass → black scene.
+- **NVN `transform feedback` has no direct Metal equivalent** and is often stubbed to a no-op
+  (`nvnCommandBufferBegin/EndTransformFeedback`, `BindTransformFeedbackBuffer`). Some games only use
+  it for GPU particles, so the no-op is survivable; check before assuming your black scene is
+  unrelated.
+- **Do not paper over a missing host table with a guest NOP.** The nv-device texture-view finalizer
+  fault is a *host* gap (the nv-device view table). Patching the guest's `main` with `NOP`s hides it
+  and makes the clean rewrite diverge from the patched one. Fix the host side and keep the rewritten
+  image pristine.
+- **`nvnCommandBufferSetAlphaRef` can be a no-op** to get first light; the alpha-test state a game
+  actually relies on may still bite later.
 
 ## Asset location & overlay
 
@@ -126,6 +158,29 @@ The host has D2R-specific behaviour **on by default**. Another title hits these 
 - `dm_cursor.c`, `dm_world.c` — the whole files are game-specific.
 
 Turn them off or move them behind per-game config **before** you start debugging the new title.
+
+## Advancing a game headlessly (and what input really is)
+
+A port spends its first weeks before there is a window, a controller, or a person watching. Two host
+features pay for themselves immediately:
+
+- **Scripted input by frame number.** An env var that injects button/axis states at given *guest
+  frames* (not wall-clock seconds) makes the whole boot sequence reproducible and lets you skip the
+  parts you already trust. e.g. `DM_KEYS='f360:A,f600:LLeft~0.8,f960:A*3/200'` — press A at frame
+  360, hold the left stick left for 0.8 s from frame 600, then A three times 200 frames apart.
+- **Populating a software keyboard from an env var.** A guest-side on-screen keyboard blocks
+  headless runs (a windowless run cancels the dialog and loops). Feeding the text from the host
+  (`DM_KBD='...'`) unblocks name entry without any UI automation.
+
+Two traps:
+
+- **"The button does nothing" ≠ "the button was not delivered".** Before blaming the input HLE, log
+  what the host actually published (a one-line debug print inside the pad-state fill function). If
+  the game reads your state and still does not advance, the screen wants something else.
+- **The on-screen glyph is not the button.** A prompt that looks like the `L` shoulder button can be
+  the **left analog stick** (tilt, not click). One title's "Get Up" prompt accepted `L` in the raw
+  input state but never advanced; the left stick up did. Read the glyph as "some input", and if the
+  obvious button is a no-op, try the stick directions.
 
 ## Reading the log: what "good" looks like
 

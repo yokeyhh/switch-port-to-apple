@@ -7,6 +7,7 @@ everything is produced from files you extracted from your own copy.
 |---|---|
 | `bnsh.py` | Read a `BNSH` bank, list programs, export each as `<bank>.<idx>.<stage>.code` (SPH + instructions + tail) |
 | `dmsh_jobs.py` | Turn a directory of `.code` files into the `dmsh_xlate` job JSON |
+| `runtime_jobs.py` | Turn a host `DM_NVN_SHDUMP` directory (`<key>.ctl` + `<key>.code`) into the same job JSON, decoding the stage and slicing `c1` from the control record (`references/runtime-shaders.md`) |
 | `c1_extract.py` | Locate the `c1` (`BRX` jump table) runs and emit the padded blobs |
 | `c1_verify.py` | Four independent checks on those blobs |
 | `shader_chain.py` | SPIR-V → MSL (`spirv-cross`) → `.metallib` (`xcrun metal`) |
@@ -64,3 +65,19 @@ python3 scripts/refl_stats.py work/out_c1 --tsv work/shader_refl.tsv
 - `bnsh.py dump` keeps the nonzero tail of each record (table + constants) on
   purpose: the translator slices the instruction region itself, and `c1` extraction
   needs those bytes.
+
+## Runtime programs (not in any bank)
+
+`references/runtime-shaders.md`. When the host reports a shader key missing from the
+map and was run with `DM_NVN_SHDUMP=<dir>`, it has written `<key>.ctl` + `<key>.code`
+for each miss. `runtime_jobs.py` turns those into the same job JSON — no `c1` hunting,
+because the control record carries the table's offset and length:
+
+```sh
+python3 scripts/runtime_jobs.py shdump --out runtime/jobs.json --work runtime/code
+dotnet run --project dm/gfx/tools/dmsh_xlate -- runtime/jobs.json runtime/spv
+python3 scripts/shader_chain.py runtime/spv runtime/mlib --jobs 10
+# install <key>_b.metallib + <key>_b.json into the package; append the rows to shader_map.tsv
+```
+
+Repeat (play further, dump, pack) until the log stops reporting misses.
