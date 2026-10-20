@@ -558,3 +558,33 @@ vertex-buffer-vs-transform-feedback overlap check that could never fire).
 **Hard rule:** if a brand-new diagnostic prints all zeros, or the same value everywhere, suspect the
 ABI first (struct by value vs pointer, `bool`/`char` widening, variadics) and only then the
 hypothesis.
+
+## Screenshot claims: measure before you write them down
+
+A downscaled frame is not evidence. This cost two full rounds here — once in each direction — on the
+same class of artifact:
+
+1. repeated decor in a bedroom was recorded as a "4×2 tiling bug" (it was two shelves, a poster and a
+   jagged rug pattern);
+2. after correcting that, a clean CJK title on a menu was recorded as "the whole UI layer tiled at ⅓
+   scale" — and that one reached a written report before a 2× crop of a 1000×150 strip showed the text
+   is drawn exactly once.
+
+Dense CJK glyphs are the worst case: at ½ or ¼ scale the strokes alias into what reads as repeated
+blocks. Whole-frame thumbnails also manufacture patterns out of diagonal bands and gradients.
+
+Cheap, decisive checks, cheapest first:
+
+- **Pixel-diff two shots of the same camera.** A real artifact leaves structure; identical frames are
+  identical (here: mean |Δ| = 0.0000, and a 0.998 correlation against two other shots of the same
+  frame from different runs).
+- **High-pass a single text/detail row and autocorrelate it 1-D.** A genuine tile shows a *secondary
+  peak* near 1.0 at some shift. Here the maximum over all shifts was 0.19 — and the "broken" frame's
+  autocorrelation curve was point-for-point identical to the clean frame's.
+  Note the trap: whole-image autocorrelation is **useless** on flat or gradient-heavy frames (it just
+  decays), which is exactly how the phantom survived the first check.
+- **Crop small, then enlarge.** 1000×150 at 2× shows strokes; the full 1920×1080 at thumbnail size
+  shows shapes that are not there.
+
+Corollary: when a "bug" appears in exactly the frames you were not looking at, and never survives a
+numeric test, it is usually the viewing scale. Write the number into the report, not the impression.
