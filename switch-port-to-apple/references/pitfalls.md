@@ -500,3 +500,61 @@ Make the constant gate **value-based, not index-based**: the same shader family 
 variants, and the `5.555556` sat in slot 2 in some and slot 3 in others. An index-based match (plus a
 neighbouring sentinel) silently applied to half of them — the symptom is "the fix works in some
 scenes and not others".
+
+## "The model is exploded" is usually a buffer nobody wrote
+
+Two states decide whether a pile of garbage vertices ever reaches the screen. Check both before you
+suspect vertex formats, strides or skinning matrices.
+
+### 1. `SetRasterizerDiscard` means "these draws must not be rasterised"
+
+Modern NVN titles use **transform feedback + rasterizer discard** for GPU skinning / mesh
+pre-processing: the draw exists only to stream vertex-shader outputs into a buffer. The geometry is
+intermediate data — rasterising it paints giant flat polygons across the screen, which reads exactly
+like "the model is broken" or "the vertex format is wrong".
+
+Metal has no discard state, but skipping the draw is **exactly equivalent** (NVN guarantees the
+attachment is untouched). Record the flag as a real op, skip in the draw path, and count the skips —
+they are a good health metric. In this title one 1080p pass had **237** such draws per frame.
+
+### 2. A vertex buffer that overlaps a transform-feedback range
+
+Transform feedback itself is often still unimplemented (Metal has no stream-out; it needs
+SPIRV-Cross's `msl-transform-feedback` to emit `[[buffer(n)]]` writes plus binding plumbing). Then
+the buffer the game streams into is **never written**, and the *consumer* draw — the game binding it
+back as a vertex buffer, not necessarily via `DrawTransformFeedback` — reads uninitialised memory.
+
+Cheap, permanent instrumentation that proves it:
+
+```c
+// at BindTransformFeedbackBuffer: remember (address, size) per index  — addresses are guest addresses,
+// so the overlap check below needs no translation
+// at BindVertexBuffers: for each range, if it intersects a recorded TF range → log once + set bit i
+// in a per-stream "poison" mask on the bind op
+// in the draw path: if any bound stream has its poison bit set → skip the draw (DM_NVN_TFSKIP=0 to compare)
+```
+
+What this buys you: the difference between *"random garbage polygons"* and *"a coherent mesh with a
+wrong camera"*. The first means the vertex data is fake; the second means the data is real and the
+transform is wrong. Those are completely different investigations, and picking the right one is worth
+more than any amount of staring at the screenshot. Skipping is also the honest fallback: drawing
+unwritten memory can only ever produce garbage.
+
+Caveat: `nvnCommandBufferDrawTransformFeedback(cb, primitive, address)` gives you no vertex count, so
+it cannot be honoured either. Log it and drop it rather than guessing a count.
+
+## For small NVN structs, check the calling convention before trusting a negative result
+
+NVN passes many small structs **by value** (`NVNbufferRange { address, size }`,
+`NVNtextureView`, …). On aarch64 a two-qword struct arrives exactly like two integer arguments
+(x2/x3). If you declare the HLE function as taking a *pointer*, the guest address lands in the first
+integer slot and you read `0 + 0` — with no crash and no warning.
+
+The trap is not the wrong read, it is the conclusion you draw from it: a freshly added diagnostic
+that depends on those values will produce "no hits", and you will conclude your hypothesis was wrong
+when in fact the instrument was broken. This cost a full round of investigation here (a
+vertex-buffer-vs-transform-feedback overlap check that could never fire).
+
+**Hard rule:** if a brand-new diagnostic prints all zeros, or the same value everywhere, suspect the
+ABI first (struct by value vs pointer, `bool`/`char` widening, variadics) and only then the
+hypothesis.
