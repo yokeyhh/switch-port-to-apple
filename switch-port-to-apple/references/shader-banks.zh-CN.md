@@ -201,3 +201,10 @@ job["c1"] = (b"\0" * base + table_bytes).hex()
   详见 `pitfalls.md`。
 - `c1` blob **只**被 `BRX` 解算消费。shader 里普通的 `c[1]` 读取是走正常常量段访问的，
   所以给一个不完整的 blob 对它们不算"错数据"——只是用不到。
+
+**`fout` 是唯一必须手填的一项：游戏往整数渲染目标写的时候。** 它把片元输出位置映射成
+`float|sint|uint`（缺省 `float`），位置就是 `[[color(n)]]` 的下标，反射里的 `raster.colors`
+已经给出。填错的后果是 Metal 那一步建不出管线，日志为
+`output of type float4 is not compatible with a MTLPixelFormatR8Uint color attachment`，
+**整条 subpass 里的绘制全部被跳过**。修法与"为什么不能用浮点格式视图绕过去"见 `pitfalls.md`。
+

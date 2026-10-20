@@ -221,3 +221,9 @@ Two things to keep in mind:
 - The `c1` blob is *only* consumed by the `BRX` resolution. Plain `c[1]` loads in the shader are
   emitted as normal constant-buffer accesses, so a partial blob is not "wrong data" for them — it
   simply is not used.
+- **`fout` is the one field you must fill by hand when the game writes to an integer render target.**
+  It maps a fragment-output location to `float|sint|uint` (default `float`); the location is the
+  `[[color(n)]]` index, which the reflection already reports in `raster.colors`. Get it wrong and the
+  second Metal step fails with `output of type float4 is not compatible with a MTLPixelFormatR8Uint
+  color attachment`, which costs you every draw in that subpass. See `pitfalls.md` for the exact fix
+  and why substituting a float-format view of the attachment is not a workaround.

@@ -81,6 +81,31 @@ These do not fail the build. They produce a library that loads fine and renders 
   at run time. Expect to dump them from the host and pack them with the same chain —
   `references/runtime-shaders.md`.
 
+## A fragment output's *type class* must match an integer attachment
+
+Translated MSL happily contains `out.m_31.x = as_type<float>(_94);` — a bit-pattern move whose
+value is an `int` 0…255. If the attachment is an integer format (`NVN 0x3 → MTLPixelFormatR8Uint`,
+RGB10A2_Uint, …) the pipeline **fails to build**, once per subpass, and every draw in that pass is
+skipped. The host log line is unambiguous:
+
+```
+output of type float4 is not compatible with a MTLPixelFormatR8Uint color attachment
+```
+
+Metal has no implicit conversion in either direction, so the *declaration* has to change:
+`float4 m_31 [[color(1)]]` → `uint4 …`, and `as_type<float>(i)` → `uint(i)`. The translator usually
+exposes this as a per-target control (this chain: `"fout": {"<target>": "float|sint|uint"}`, target
+index taken from the reflection's `raster.colors`). One shader, one recompile:
+
+```bash
+xcrun -sdk macosx metal -c fixed.metal -o fixed.air
+xcrun -sdk macosx metallib fixed.air -o <key>_b.metallib   # drop into pack + runtime msl dir
+```
+
+Do **not** dodge this by binding a same-width float-format view of the attachment: `as_type<float>(255)`
+is a denormal, so a UNORM write stores 0 and the pass silently writes nothing (which is exactly the
+"input is empty, so the effect is a no-op" symptom you were trying to fix).
+
 ## Graphics: device and OS splits
 
 - **BC-compressed textures.** Apple GPUs from **A16 and earlier** do not support BC. Those devices
@@ -257,6 +282,29 @@ diagnostics carry almost all the weight — build them before you need them:
 Also cheap and worth having: force the per-binding pass dump on for the first *N* draws of one shader
 key (`DM_NVN_KEYDUMP=<key>:<count>[:<interval>]`) to read the uniform values the game actually wrote at
 gameplay time rather than at boot.
+
+**Read a raw dump with the header's `rowBytes`, not with `width × bpp`.** Blit-based dumpers typically
+copy into a fixed 4-byte-per-texel staging format regardless of the source format, so a `R8Unorm` or
+`R16F` texture lands as `rowBytes = width*4`. Decoding that buffer as tightly packed 1- or 2-byte
+texels produces completely fake statistics — a "75% of texels are zero" histogram (it is the padding)
+and periodic banding (it is the stride). Two of this project's runs went down that hole. Check
+`rowBytes` first; it also tells you whether the copy converted the format.
+
+**Prove the display chain before blaming the tonemapper.** A "washed out / over-exposed" frame is
+usually *not* the tonemap: engine tone curves are frequently near-identity below ~0.8 and only
+compress the shoulder, which reads as "the curve does nothing" in a dump. Two cheap proofs:
+
+- *Closure*: dump the swapchain's raw bytes and the tonemap output texture's *linearized* dump
+  (`TEXDUMP` on an sRGB target linearizes). If the two are **byte-identical (same md5)**, the whole
+  present chain — including any double sRGB encode/decode — is closed and correct.
+- *Where the brightness is*: dump the HDR target **before** the tonemap and look at mean/median/clipped
+  fraction. If it already sits at mean ≈ 0.88 / median ≈ 0.93 / 7% clipped, the lighting stage is the
+  suspect, not the curve.
+
+And when an effect pass is a no-op, check whether it has any *input* at all before touching its maths.
+In this project the ambient-occlusion pass discarded every fragment because the texture it sampled
+was empty — and the texture was empty because the draw that fills it had its pipeline skipped for the
+integer-attachment reason above. Fixing the pipeline was the real fix; the AO maths was fine.
 
 Then check the *reflection*, not the pixels: `rt_array`, `point_size`, integer output formats, and the
 attachment formats are where whole classes of silent-wrong live (§Graphics).
