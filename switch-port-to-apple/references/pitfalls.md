@@ -543,6 +543,49 @@ unwritten memory can only ever produce garbage.
 Caveat: `nvnCommandBufferDrawTransformFeedback(cb, primitive, address)` gives you no vertex count, so
 it cannot be honoured either. Log it and drop it rather than guessing a count.
 
+**Also guard the index buffer and the indirect-argument buffer.** They come from the same unwritten
+memory. At *record* time, test the index range (`count × 2` for 16-bit indices) and the 16/20-byte
+argument record against the TF ranges, store a 2-bit poison flag in the draw op, and skip in the draw
+path alongside the vertex-stream poison. Keep the bits separate so the log says which one fired.
+
+**Third consumer, and the one that fools everybody: a render target nobody wrote.** If the skipped
+draws were the only ones writing a preview/offscreen target, the target still holds whatever was in
+that GPU allocation, and a later UI quad samples it. The screen then shows a smooth, plausible-looking
+fill — a gradient, "vertical bands", a grey card, a blurred portrait — and it **changes between runs**.
+Do not chase UVs, decoders or vertex formats there. See the next section.
+
+## Undefined content: run the same frame twice before believing any decode theory
+
+The most expensive misdiagnosis in this project's log: a character-creation confirm screen whose panel
+looked like "a texture sampled with the wrong UV sub-range — one row stretched across the panel". It
+was written into a report. It was wrong, and the check that settles it takes one extra run.
+
+Run the **same** configuration twice (same scripted input, same frame number, same env) and diff the
+two screenshots:
+
+| run | panel mean RGB | high-frequency energy in the panel |
+|---|---|---|
+| A | 0.588 / 0.302 / 0.256 | 2.1‰ |
+| B | 0.436 / 0.291 / 0.248 | 4.1‰ |
+| C | 0.603 / 0.613 / 0.668 | 2.9‰ |
+
+Pairwise correlation 0.63–0.86; 13–35 % of pixels differ by more than 0.1. **Identical input, three
+different pictures** ⇒ the content is undefined. No decoder, UV, stride or format hypothesis can
+produce three different results from the same bytes — and every hour spent on one is wasted.
+
+Two cheap numbers that identify this class immediately:
+
+- **High-frequency energy** (`mean |∇|`) of only 2–4‰ over the whole panel ⇒ the content is *blurry*,
+  i.e. leftover memory that was later blurred by a post effect, not geometry or a textured quad drawn
+  wrong (those have hard edges and normal gradient energy).
+- **Between-run mean colour differs more than within-region variance** ⇒ the whole base colour changed,
+  so it is not a local misplacement.
+
+The honest fix is to implement the missing stage (here: transform feedback). Clearing targets on first
+use is only a cosmetic band-aid, and it touches every title's hot path. Prefer writing "this target is
+never written because X is unimplemented" over a heal that hides it.
+
+
 ## For small NVN structs, check the calling convention before trusting a negative result
 
 NVN passes many small structs **by value** (`NVNbufferRange { address, size }`,
@@ -588,3 +631,40 @@ Cheap, decisive checks, cheapest first:
 
 Corollary: when a "bug" appears in exactly the frames you were not looking at, and never survives a
 numeric test, it is usually the viewing scale. Write the number into the report, not the impression.
+
+### Measuring a UI rectangle takes two numbers
+
+Third instance of the same failure: a selected menu row was recorded as "the highlight box is too
+narrow, it only covers the first two characters". Measure it:
+
+```
+yellow mask   : r > 140 & b < 110 & r-b > 60 & g-b > 40
+box           : bounding rect of the mask            -> 642 x 80 px
+text row      : bright pixels of an unselected row   -> 115 px and 164 px wide
+selected row  : 4 CJK glyphs at the same size        -> at most ~250 px
+```
+
+The box is 2.5–5× the text width. Claim dead in five minutes of arithmetic.
+
+**First make sure the frame is not a transition.** Capture several consecutive frames of the same
+screen before measuring: here frames 1150–1350 had the box at the same place (±10 px from an animated
+arrow) and an identical whole-frame mean (51.0), so the reading was trustworthy. A single frame taken
+during a cross-fade contains *two* layouts at once, and every width/height measured from it is a blend
+of both.
+
+### On-screen controls: give them a self-test that needs no mouse
+
+When a desktop front end grows touch-style controls, "plug in a mouse and see if it moves" does not
+prove the hit-test → grab → axis chain, and it cannot catch the classic bug where the right stick
+writes the left stick's axes. Add an env-triggered self-test that calls the same entry points the
+event monitor calls, then logs the resulting axes and button mask:
+
+```
+DM_TOUCH_TEST=0.8,0.6
+  left  stick (0.80,0.60)xr -> axes (26213,19660) / (0,0)      buttons 0
+  right stick (0.80,0.60)xr -> axes (0,0) / (26213,19660)      buttons 0
+  shoulders tapped once     -> 0x3c0  (expected L|R|ZL|ZR = 0x3c0)
+```
+
+It also documents the dead zone and the clamping behaviour for free (the numbers are reproducible).
+

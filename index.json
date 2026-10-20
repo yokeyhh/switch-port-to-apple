@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "switch-port-to-apple",
-      "version": "13",
+      "version": "14",
       "files": [
         "SKILL.md",
         "references/architecture.md",
