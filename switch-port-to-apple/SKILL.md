@@ -38,7 +38,7 @@ Read this page first; it is the map. Load the reference files it points at when 
 | `references/architecture.md` | The five layers in detail, with the real APIs, tables and file formats |
 | `references/code-reuse-map.md` | Every directory/file classified as reusable engine vs title-specific |
 | `references/build-pipeline.md` | Workspace setup, Mac/iOS builds, artifacts, signing, pushing game data |
-| `references/pitfalls.md` | The traps that cost real time (AAPCS64, no-JIT, BC textures, version drift, layer-range/`renderTargetArrayLength`, stencil-plane texture views, how to diagnose a black scene) |
+| `references/pitfalls.md` | The traps that cost real time (AAPCS64, no-JIT, BC textures, version drift, layer-range/`renderTargetArrayLength`, stencil-plane texture views, shared-font BFTTF header vs raw TTF, proving "the file was read" with read-range logs, on-screen controls for a desktop front end, how to diagnose a black scene) |
 | `references/shader-banks.md` | When shaders arrive in `BNSH` banks instead of a per-program package: slicing NVN programs out, and the `c1` BRX jump table (`shader-banks.zh-CN.md` for the Chinese text) |
 | `references/runtime-shaders.md` | Programs the title builds **at run time** (dump from the host on a map miss, translate with the same chain, install into the same package) |
 | `scripts/` | Runnable tools for that path — `bnsh.py`, `c1_extract.py`, `c1_verify.py`, `dmsh_jobs.py`, `runtime_jobs.py`, `shader_chain.py`, `refl_stats.py` (see `scripts/README.md`) |

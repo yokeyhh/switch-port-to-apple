@@ -250,6 +250,80 @@ Two traps:
   input state but never advanced; the left stick up did. Read the glyph as "some input", and if the
   obvious button is a no-op, try the stick directions.
 
+## Shared fonts: the title may never call `Decode`
+
+From SDK 13 the shared font is handed over as **an 8-byte BFTTF header + a word-XOR'd TTF**, so the
+game can call `nn::fontll::ScalableFontEngineHelper::Decode` itself. Some titles never do — they pass
+`GetSharedFontAddress` straight to `LoadFont`.
+
+Then the header is read as font data, `LoadFont` fails, the font object's character map stays empty,
+**every** glyph lookup misses (including the `'?'` fallback), and a text object that only checks the
+first lookup dereferences the second, unchecked one:
+
+```
+bl glyph_lookup          ; cbz x0, fallback
+...
+; state 2 → "this cell was already resolved": look the cached id up again
+bl glyph_lookup          ; no NULL check
+ldrh w0, [x0, #0x4c]     ; SIGSEGV, fault addr 0x4c
+```
+
+Fingerprints that make this recognisable in minutes:
+
+- it crashes **only** in CJK languages — Latin text never touches the shared font;
+- the crashing lookup's character argument is `0x3f` (`'?'`); no font "lacks" `'?'`;
+- the language **list** already renders CJK (that path uses the title's own RomFS font), so this is
+  not "missing glyphs" — missing glyphs draw tofu boxes, they do not fault;
+- read logging proves the `.bfotf` files in RomFS were read **completely, long before** the crash.
+
+Fix: one line in the title profile — the address points at the TTF itself and the size excludes the
+header (same fix as SMBW, which hit the identical wall on SDK 10):
+
+```
+shared_font	ttf
+```
+
+**How to prove "the file was read" cheaply.** A per-`ReadFile` log (`DM_FSLOG=<tsv>`: time, guest
+path, offset, length) plus the archive inventory (`name, offset, size` for every entry inside the
+pack) lets you intersect read ranges with files:
+
+```python
+# fshits.py <inventory.tsv> <fslog.tsv> [name substring ...]
+# 100.0%  x1  @0.41s  arc/applifontbinFOT-UDKakugoC80Pro-B.bfotf.trpak
+```
+
+If a file shows 100% coverage *before* the crash frame, the reader/decompressor is not your bug.
+Do this **before** instrumenting the decoder — it is one run and one script.
+
+## On-screen controls on a desktop front end
+
+A desktop front end starts as a keyboard map (WASD = left stick, arrows = D-pad, four letters =
+ABXY) and that is enough for months. When it becomes a *playability* harness, a mouse-driven
+virtual stick pays for itself — and the cheapest implementation touches no HLE at all:
+
+- one transparent `NSView` overlay over the game view draws the stick, a D-pad, ABXY and +/−;
+- the step function **ORs its buttons and axes into the same state the keyboard produces** and calls
+  the existing input publish (`dm_input_set`) — the game cannot tell the two apart;
+- the mouse monitor must "consume on hit, forward on miss", otherwise a click on a button also
+  becomes a touch-screen finger.
+
+Three things that cost time:
+
+- **Verify the overlay's geometry with markers, not by eye.** A layered subview over a manually
+  assigned `CAMetalLayer` is worth one calibration run: draw a coloured square at the view's bottom
+  left **and another at the opposite corner**, `screencapture`, and check both pixel positions
+  against the window frame the host logs. The eye cannot tell a 1:1 overlay from a 2× one on a
+  translucent circle — and one marker at `(0,0)` proves nothing, because `(0,0)` lands in the same
+  place at any scale. (Cost: an hour of chasing a "clipped stick" that was never clipped.)
+- **The stick origin is the press point, not the base centre.** Centring it makes every touch jerk
+  the character; anchoring at the press point feels right and is three lines.
+- **Ship a D-pad too.** Menus often ignore the analog stick (this title loses steps and even moves
+  the cursor the opposite way) while the D-pad is exact, so the world can use the stick and the
+  menus the D-pad.
+
+Limitation to write down rather than fight: one mouse pointer means "hold the stick and press A"
+is impossible; real play is mouse on the stick plus keyboard buttons (or the reverse).
+
 ## Reading the log: what "good" looks like
 
 - `紫闪探针 … 画面品红 0 次, 调色表异常 0 次` → no missing shaders (the magenta probe).
