@@ -668,3 +668,41 @@ DM_TOUCH_TEST=0.8,0.6
 
 It also documents the dead zone and the clamping behaviour for free (the numbers are reproducible).
 
+
+### A post-process pass that outputs a constant: shader-computed vs clear-value, and the empty-atlas check
+
+Two separate failure modes look identical in a screenshot ("this pass output is 1.0 everywhere"):
+
+**(a) Is it the shader computing it, or is it clear-value residue?** A pass that discards / never draws
+leaves the attachment at its clear value, which is indistinguishable from a shader that really computes
+that constant. Split them by writing the intermediate booleans/floats into the (single-channel) target
+in screen-x bands:
+
+```
+band 0: did we take the early-out branch?        band 1: depth-threshold test
+band 2..: the bits that matter (strength, sample, final value)
+```
+
+Write into the R component and read the **R** channel band averages. Do **not** convert to grayscale /
+`convert('L')` — L weights R at 0.299 and drags a raw 1.0 down to 0.299, which looks like "the band is half".
+Here this proved the SSAO shader really computes 1.0 (the sample loop ran but found zero occlusion);
+it was not a discard/clear-state artifact.
+
+**(b) If it computes the constant, check the input atlas is not empty.** A loop that reads a 1024² "kernel /
+thickness" atlas and finds nothing will return its neutral value. Read those textures directly in the
+fragment (`read()`/`sample()`) and write them into bands: here two atlas textures (fp_t_tcb_28, fp_t_tcb_42)
+came back all-zero, which is why the loop found no occlusion.
+
+Then ask "who fills it, and does that pass run this frame?" The texture was **cleared** by one render pass and
+only **read** by others; the pass that should write 0/1/255 content into it (an R8Uint pass fixed earlier) did
+**not run in this scene**. So the atlas is empty by the game's own scene-gating — not a host draw-path bug.
+Conclusion: "constant output + empty input atlas + the producer pass is scene-gated" = the effect is
+legitimately off in this scene, not a bug to chase.
+
+### PASSDUMP only shows the first 4 floats of a constant buffer; use DM_NVN_CBHEX for deep slots
+
+To answer "is this coefficient zero or just not bound", the first 4 floats are not enough — a SSAO pass
+needs `c3[212..219]` (8 per-material AO strengths) and `c3[228]` (a mode/float + a depth threshold).
+PASSDUMP prints only the first float4 of each cbuffer. `DM_NVN_CBHEX=<reg>[,<reg>...]` (optionally
+`DM_NVN_CBHEX_KEY=<fragment key prefix>`) prints the whole constant buffer in hex from `draw()`; it lives
+inside the `passdump()` block, so set `DM_NVN_PASSDUMP` too.
