@@ -283,12 +283,24 @@ Also cheap and worth having: force the per-binding pass dump on for the first *N
 key (`DM_NVN_KEYDUMP=<key>:<count>[:<interval>]`) to read the uniform values the game actually wrote at
 gameplay time rather than at boot.
 
-**Read a raw dump with the header's `rowBytes`, not with `width × bpp`.** Blit-based dumpers typically
-copy into a fixed 4-byte-per-texel staging format regardless of the source format, so a `R8Unorm` or
-`R16F` texture lands as `rowBytes = width*4`. Decoding that buffer as tightly packed 1- or 2-byte
-texels produces completely fake statistics — a "75% of texels are zero" histogram (it is the padding)
-and periodic banding (it is the stride). Two of this project's runs went down that hole. Check
-`rowBytes` first; it also tells you whether the copy converted the format.
+**Read a raw dump with the header's `rowBytes`, not with `width × bpp` — and then don't trust the
+lane-0 stride either.** Blit-based dumpers typically copy into a fixed 4-byte-per-texel staging
+format regardless of the source format, so a `R8Unorm` or `R16F` texture lands as
+`rowBytes = width*4`. Decoding that buffer as tightly packed 1- or 2-byte texels produces
+completely fake statistics — a "75% of texels are zero" histogram (it is the padding) and periodic
+banding (it is the stride). Two of this project's runs went down that hole.
+
+Then comes the second-order version of the same trap: **a 4-byte stride with "take lane 0" is not a
+decoder for a single-channel texture either.** In this project that reading showed a depth map
+"only in the left third of the screen", which sent a whole debugging cycle after a view-clipping bug
+that did not exist — while the **PNG the dumper wrote from the same texture was full-frame**. Two
+rules follow:
+
+- **Judge content from the PNG the dumper writes; judge raw bytes from `.raw`.** When they disagree,
+  the PNG is right. `.raw` is for formats the PNG path cannot represent (integer formats sample as
+  float and come out all zero) and for exact byte values (an sRGB target's PNG is *linearized*).
+- When you build a hypothesis on top of a dump, **first reproduce the dump's own picture** from the
+  bytes. If you cannot, you have learned nothing about the texture, only about your decoder.
 
 **Prove the display chain before blaming the tonemapper.** A "washed out / over-exposed" frame is
 usually *not* the tonemap: engine tone curves are frequently near-identity below ~0.8 and only
@@ -302,9 +314,18 @@ compress the shoulder, which reads as "the curve does nothing" in a dump. Two ch
   suspect, not the curve.
 
 And when an effect pass is a no-op, check whether it has any *input* at all before touching its maths.
-In this project the ambient-occlusion pass discarded every fragment because the texture it sampled
-was empty — and the texture was empty because the draw that fills it had its pipeline skipped for the
-integer-attachment reason above. Fixing the pipeline was the real fix; the AO maths was fine.
+In this project an AO pass produced nothing but its clear value, and the first diagnosis ("it discards
+every fragment because the sampled depth is empty") turned out to be an artifact of the raw decoder
+above, not of the texture. Two things did survive scrutiny and are worth carrying forward:
+
+- **Sampling a texture that is also an attachment of the same pass is undefined in Metal.** Colour
+  feedback is usually handled (the runtime ends the pass and snapshots the attachment before the
+  draw); the **depth** case usually is not — and a deferred renderer's SSAO pass is exactly
+  "depth attachment = the texture the fragment stage samples". Fix by snapshotting the depth plane, or,
+  when none of the pass's draws test/write depth (`dt=0, dw=0, st=0`), by not attaching it at all.
+  A 1x1 exposure pass that `load`s, blends and samples its own attachment is the same class.
+- If a pass reads a **depth** attachment through a sampling view, also confirm the preceding pass
+  actually *stored* it (store actions get set to `DontCare` aggressively when a target looks dead).
 
 Then check the *reflection*, not the pixels: `rt_array`, `point_size`, integer output formats, and the
 attachment formats are where whole classes of silent-wrong live (§Graphics).

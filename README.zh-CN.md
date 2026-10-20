@@ -10,7 +10,9 @@ Apple 芯片上原生运行**——不做 CPU 模拟——做法是：
 5. 再用平台外壳（macOS `.app` / iOS `.app`）包起来。
 
 内容以 [**d2r-mobile**](https://github.com/jhaizhou-ops/d2r-mobile) 项目（《暗黑破坏神 II：狱火重生》
-Switch 版，MIT）为依据，并按**可复用到其它游戏**来写：包含逐文件的「引擎 vs 与本作绑定」复用对照表，
+Switch 版，MIT）为依据，另有一个参考实现 [**totk-mobile**](https://github.com/OJZen/totk-mobile)
+（《塞尔达传说：王国之泪》，在 Apple 芯片上**已可玩**），用来对照「每一层应该长什么样」以及工程流程。
+本技能按**可复用到其它游戏**来写：包含逐文件的「引擎 vs 与本作绑定」复用对照表，
 以及开始之前必须先关掉的本作专属默认项清单。
 
 英文版：[README.md](README.md)

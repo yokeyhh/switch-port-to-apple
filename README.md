@@ -10,9 +10,11 @@ An [OpenCode](https://opencode.ai) skill that captures **how to run a Nintendo S
 5. wrapping it all in a platform shell (macOS `.app` / iOS `.app`).
 
 It is grounded in the [**d2r-mobile**](https://github.com/jhaizhou-ops/d2r-mobile) project
-(Diablo II: Resurrected, Switch release, MIT), and is written to be reused for **other titles**:
-it includes a file-by-file *engine vs title-specific* reuse map and the list of game-specific
-defaults you must turn off first.
+(Diablo II: Resurrected, Switch release, MIT), with a second reference implementation,
+[**totk-mobile**](https://github.com/OJZen/totk-mobile) (Tears of the Kingdom, playable on Apple
+silicon), used for how the layers and the process should be *shaped*. It is written to be reused for
+**other titles**: it includes a file-by-file *engine vs title-specific* reuse map and the list of
+game-specific defaults you must turn off first.
 
 中文：[README.zh-CN.md](README.zh-CN.md)
 
@@ -32,6 +34,12 @@ The `shader-banks` one is in Chinese too: `references/shader-banks.zh-CN.md`.
 
 ## What's new
 
+- **v8 — the dump decoder was lying, and a second reference.** A "the pass only sees a third of the
+  texture" conclusion turned out to be a raw-dump decoding artifact (stride 4 + lane 0 is not a
+  decoder; the dumper's own PNG was full-frame) — now a rule in `pitfalls.md`. Plus the
+  sample-your-own-attachment class for **depth** attachments, and `totk-mobile` as a second
+  reference implementation (one `nvn_*.inc` per quirk, bilingual docs in the same commit, Metal
+  read-back tests).
 - **v4 — runtime-constructed shaders.** A bank scan is not the whole set. Titles build programs at run
   time (later areas, characters, UI); the host dumps the ones missing from the map, and
   `runtime_jobs.py` translates them into the *same* package. Plus new `pitfalls.md` entries: paired

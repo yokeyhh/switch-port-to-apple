@@ -16,6 +16,21 @@ it expects (Horizon) is replaced by a small host. There is no CPU emulator and n
 - Every path below is relative to that clone unless stated otherwise. Repo docs are bilingual
   (`README.md` / `README.zh-CN.md`); code comments carry both Chinese and English.
 
+**Second reference implementation:** `totk-mobile` — The Legend of Zelda: Tears of the Kingdom
+1.4.3, running *playable* on Apple silicon (Mac / M1+ iPad / early iPhone build: saves, cutscenes,
+audio, controller rumble, 30/60/90 fps targets). Same lineage as `d2r-mobile`, so it is the best
+public evidence that this route reaches a playable title, and the best place to look when the
+question is "how should this layer be shaped".
+- Upstream: `github.com/OJZen/totk-mobile` (source only, no game data)
+- Mine it for **structure and process**, not for a magic fix: one `host/nvn_*.inc` per NVN quirk
+  (`nvn_sampled_view`, `nvn_pass_writes`, `nvn_texture_rendered`, `nvn_attachmentless`,
+  `nvn_conditional_draw`, `nvn_texture_alias`, `nvn_depth_output`, `nvn_present_scale`,
+  `nvn_query_gpu`, `nvn_clear_region`, `nvn_deferred`, `nvn_residency` …) with the symptom,
+  the measurement and the reason in the comment; bilingual docs updated in the same commit;
+  Metal read-back tests for texture alias / invalidation / fence; per-feature diagnostic switches.
+  Note that an unimplemented `nvn_conditional_draw` draws *more*, it does not draw *wrong* —
+  don't misread extra geometry as extra light.
+
 Read this page first; it is the map. Load the reference files it points at when you need depth:
 
 | File | Covers |
