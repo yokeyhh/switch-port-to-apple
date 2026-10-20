@@ -403,3 +403,55 @@ above, not of the texture. Two things did survive scrutiny and are worth carryin
 
 Then check the *reflection*, not the pixels: `rt_array`, `point_size`, integer output formats, and the
 attachment formats are where whole classes of silent-wrong live (§Graphics).
+
+## When the frame is washed out (over-exposed)
+
+"Washed out" is a measurement, not an impression. Three numbers decide whether it is the tone curve
+or the lighting:
+
+- **the HDR target that feeds the tonemap**: median, p99, fraction of pixels above 1.0;
+- **the final frame**: pure-white fraction, and its *displayed dynamic range* (`p99/p50` of the
+  linearised values, which collapses to ~1.0 when the highlights are clipped);
+- **the same two for a scene you already know renders correctly** (menus, character creator). Same
+  chain, different content — this is what separates "the curve is wrong" from "the scene is too hot".
+
+In this project the in-game room measured HDR median 1.00 / p99 4.88 / 42% above 1.0, final frame
+**67% pure white** and a displayed range of **1.09** (vs 4.88 in the HDR). The menus in the same
+build: median 0.15, pure white 1–2%. So the curve was fine and the scene arrived ~5× above it.
+
+Cheap confirmation before touching any code: rescale the dumped HDR (here ×0.2) and run a normal
+ACES + sRGB in numpy. If the frame suddenly reads like the real game, the defect is a **global gain**,
+not one light's colour, not "missing contrast". That one step removes most shader hypotheses.
+
+Where the gain hides:
+
+- **Exposure is frequently baked into a shader's static `c1` segment**, not applied per frame. The
+  tone-mapping shader here carried `c1[0].z = 1/0.18` (middle-grey normalisation) and
+  `c1[0].w = 1/13.6` (log2 axis width), and the 32³ grading LUT was generated from the *same*
+  constants — so the curve "looks like a curve" in a dump while the input is 5× too high.
+- **A 1×1 auto-exposure buffer can exist and be dead.** Here the adaptation pass wrote it and only
+  the adaptation pass read it; the frame had **zero texture→buffer copies**, so there was no CPU
+  readback either. "The game computes an exposure" does not mean "the exposure is applied".
+- **A knob that costs nothing**: scale that single `c1` float for the tone-mapping shader only — gate
+  on the constant pair (`1/0.18` next to the sRGB knee `0.0031308`) so the LUT generator is not
+  touched, and expose it as e.g. `DM_NVN_EXPOSURE=<k>`. It shifts the whole image along the tone
+  curve, touches no render target, and defaults off. Use it to unblock play-testing, and keep
+  looking for the real gain.
+- Sanity-check the curve's **white point in HDR units**. A middle-grey-normalised curve that
+  saturates at an HDR value of ~1.5 is being fed values ~8× mid-grey; a filmic curve for that range
+  should not clip until ~4–16.
+
+### Clear-only passes are usually not your bug
+
+A pass that opens targets, clears them and issues **no draws** looks alarming in a pass dump, but
+triage it in two steps before instrumenting the HLE:
+
+1. **Is there a `K` line (a program was fetched)?** No `K` line at all means the guest itself never
+   issued a draw in that pass — scratch targets being cleared for a later frame, or an effect that
+   simply does not run in this scene (screen-space reflections/GI indoors). Nothing was dropped.
+   Only "`K` present, draw missing" or a `Q` line with a skip reason points at the host.
+2. **Does anything read that target in the same frame?** No reader = dead chain; ignore it.
+
+In this project 26 such passes (a 21-pass R8 luminance pyramid plus five half-res scratch targets)
+turned out to be exactly this, and the only real reader was the deferred lighting pass reading three
+legitimately zero buffers.
