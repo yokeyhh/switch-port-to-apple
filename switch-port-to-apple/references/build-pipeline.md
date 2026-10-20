@@ -175,3 +175,47 @@ game files, make the install package with `dm/tools/d2rm_pack.py`, sign with a s
 this route only, the **first launch compiles shaders on the phone** (~7 min, once) because the
 packaging machine has no Apple shader compiler. `spirv-cross` must match the shell's registered
 version or `d2rm_pack.py` stops.
+
+### Adapting build_ipa.sh to a project that is not in the NSP-work layout
+
+`build_ipa.sh` expects `W` = `<NSP>/<id>-work` (with `build/patched_<PKG>`, `data/<PKG>/RomFS`,
+`data/v0/control.nacp`, `icon.jpg`). A project that keeps things in its own layout does **not** need
+that directory rebuilt: every path is overridable by environment variable.
+
+```sh
+cd dm/ios
+export GAME=<title id> \
+  DM_DISPLAY_NAME='<name>' DM_APP_VERSION='1.0.0' \
+  W=$MY_WORK_FOLDER \
+  PATCHED=$MY_WORK_FOLDER/rewrite-guest \
+  ROMFS=$MY_WORK_FOLDER/romfs \
+  MSL_IOS=$MY_IOS_SHADER_DIR \
+  FONT_PY=$VENV/bin/python \
+  DM_TEAM_ID=0000000000
+bash tools/build_ipa.sh out/<name>-ios.ipa
+```
+
+- `DM_DISPLAY_NAME` / `DM_APP_VERSION` are **required when there is no `control.nacp`** (else the script dies).
+- `FONT_PY` must be a python that has `fontTools` (`make_ext_font.py` needs it; `venv/bin/pip install fonttools`).
+- `DM_TEAM_ID=0000000000` is a placeholder → an unsigned IPA; the install tool (AltStore/Sideloadly)
+  swaps in your own certificate/bundle ID.
+- The bulk of the IPA is the packed RomFS; an uncompressed-app (no device build) is the fastest feedback loop.
+
+### iOS shader library: recompile the same MSL for iphoneos, same keys, reuse the Mac reflection
+
+The host keys a shader by `<key>_b.metallib`. The Mac pack copies a pre-compiled (macOS) metallib under
+that name; **iOS just recompiles the same MSL for iphoneos under the same key**. The `_b.json` reflection
+is platform-neutral — its `chain` field is only the chain-version string, it records no compile command —
+so copy the Mac json unchanged.
+
+```sh
+xcrun -sdk iphoneos metal -c -mios-version-min=18.0 \
+  -fmetal-math-mode=relaxed -fpreserve-invariance <stem>.metal -o <key>.air
+xcrun -sdk iphoneos metallib <key>.air -o <key>_b.metallib
+```
+
+`-fmetal-math-mode=relaxed` is **mandatory** (keeps fast math but forbids assuming no NaN/Inf: the
+translated shaders reproduce Maxwell NaN semantics with `isnan` selects, and default `fast` lets the
+GPU backend fold them to false → black band/glow). `-fpreserve-invariance` keeps `[[invariant]]`
+position outputs consistent across shaders. A bridge that enumerates `(key, stem)` from the title's
+packer (`collect()` + dedup by key) and compiles each for iphoneos yields a full iOS library in one pass.
