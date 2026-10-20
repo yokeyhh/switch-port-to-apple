@@ -455,3 +455,48 @@ triage it in two steps before instrumenting the HLE:
 In this project 26 such passes (a 21-pass R8 luminance pyramid plus five half-res scratch targets)
 turned out to be exactly this, and the only real reader was the deferred lighting pass reading three
 legitimately zero buffers.
+
+## Reconstructing a missing stage instead of hardcoding a constant
+
+A fixed knob unblocks play-testing but is not a port. Two cheap diagnostics decide whether the
+missing thing can be rebuilt from data the game already produces.
+
+**1. Null one input and measure what it was worth.** `MAGSCAN`-style output substitution answers
+"did this draw happen"; it cannot answer "how much of the frame is this term". Add the mirror image:
+`DM_NVN_TEXZERO=<serial,…>`, which binds an all-zero 1×1 dummy **of the type class the shader
+declares** (not of the original texture) — so `texture2d`, `texturecube` and arrays all stay valid
+and only the content changes. Here, zeroing the irradiance probe and the prefiltered specular probe
+dropped the frame median from 0.92 to 0.73 (sRGB), i.e. IBL was ~41% of the median radiance, and the
+frame was *still* 2.7× middle grey with the whole IBL gone. That single result retired the
+"ambient light is too bright" theory and pointed at a global gain. Caveat: you are nulling sampled
+*content*, so do not do this to depth/stencil inputs that drive discard or classification.
+
+**2. Prove a value is unused on both sides before claiming it is missing.** "No pass binds it this
+frame" is only half the proof — the CPU may consume it. The other half is the copy counter: log
+`CopyTextureToBuffer` (`copy_t2b`) behind a flag and run a whole session. Here it was **0 copies in
+1500 frames**, which is what makes "the auto-exposure output is dead" a conclusion rather than a
+guess.
+
+**3. Then rebuild the stage from the curve's own units.** A tone curve that carries `1/0.18` states
+its contract: middle grey arrives as 0.18. If the engine also computes an average luminance (even an
+unconsumed one), the missing exposure is `k = 0.18 / avg`. Here the engine's 1×1 held 0.7106 and
+`0.18/0.7106 = 0.253`, matching the best hand-tuned constant to 1% — three independent numbers
+agreeing is what makes the reconstruction credible.
+
+Implementation notes that matter:
+
+- read the 1×1 back with a **1-texel blit queued behind the frame, value read in the completion
+  handler** — never a GPU wait on the present thread;
+- identify it structurally (`1×1` + `RGBA32Float` attachment), not by serial;
+- **register the c1 slot** (buffer, byte offset, original value) when the shader is built, then write
+  `original * k` each time k changes — otherwise repeated scaling accumulates;
+- damp (`k = old + (new-old)*0.25`), clamp (0.02…20), and expect a wild k during loading (here it
+  went 15 → 0.25 over ~100 frames);
+- keep it **opt-in and labelled unverified**: reconstructing a stage is not the same as proving the
+  original behaviour. It is still far better than a constant, because it follows the scene instead
+  of crushing the ones that were already correct.
+
+Make the constant gate **value-based, not index-based**: the same shader family in this title had 16
+variants, and the `5.555556` sat in slot 2 in some and slot 3 in others. An index-based match (plus a
+neighbouring sentinel) silently applied to half of them — the symptom is "the fix works in some
+scenes and not others".
