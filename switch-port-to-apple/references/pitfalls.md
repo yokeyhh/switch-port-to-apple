@@ -774,3 +774,33 @@ Keep the shared logic (here: the EFAULT retry) unconditional; only the extra dia
 
 Rule: **rebuild the IPA after every host change.** The Mac build cannot see these; `xcodebuild` is the
 only thing that catches a new Mac-only API before it reaches a device.
+
+## "No sound" is often the desktop host's silent sink — verify the game's own output
+
+Symptoms: launches are silent, and the audio log says something like
+`audren: rendered 200 frames, 0 with sound`. That line alone does **not** prove the game is mute:
+it may describe one output (the one your audio-renderer HLE drives), while the game also opens a
+second `AudioOut` of its own and writes its mixed PCM there.
+
+Check, in order:
+
+1. **The host's default backend.** Desktop hosts often default to a *silent sink* so automated
+   runs stay quiet, and to real output only on iOS. Find the equivalent of
+   `real_audio()` (`DM_AUDIO=1` to override) and check what a plain launch does. A player who
+   starts the app with no env vars gets silence.
+2. **How many outputs the game opens.** Log every `OpenAudioOut` with channel count, frame size
+   and call site. In one title the audible stream was the game's own 2-channel `AudioOut`
+   (1024-frame blocks), while the 240-frame blocks from the HLE renderer were all zero.
+3. **Whether the PCM is real audio.** Judge structure, not "non-zero":
+   - concatenate the game-sized blocks and measure **boundary discontinuities** — a real music
+     stream has almost none (here: 0.16% of samples jumped >3000);
+   - measure the spectrum — music/voice concentrates at 200–1000 Hz (here 62%, centroid 1.2 kHz);
+   - re-run the same deterministic route and cross-correlate: real audio is bit-identical
+     (here `corr=1.0000`, `max|diff|=0`). Note that stale guest heap is also bit-identical under
+     deterministic emulation, so pair this with the continuity test.
+4. **Pick the right scene.** Language selection, boot logos and black fades often have no BGM.
+   A "silent title" screenshot may simply be the language menu.
+
+Fix: turn real output on in the launcher (`DM_AUDIO=1` by default in `play.sh`) and keep the host
+default silent for tests. Also confirm each output's device callbacks show 0 underruns; a silent
+redundant output is harmless, a starving one is not.
