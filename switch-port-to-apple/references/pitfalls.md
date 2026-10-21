@@ -706,3 +706,24 @@ needs `c3[212..219]` (8 per-material AO strengths) and `c3[228]` (a mode/float +
 PASSDUMP prints only the first float4 of each cbuffer. `DM_NVN_CBHEX=<reg>[,<reg>...]` (optionally
 `DM_NVN_CBHEX_KEY=<fragment key prefix>`) prints the whole constant buffer in hex from `draw()`; it lives
 inside the `passdump()` block, so set `DM_NVN_PASSDUMP` too.
+
+## A signal the engine computes but nobody reads is usually a *missing stage*
+
+When a scene looks wrong (5x too bright, washed out, flat), check whether the engine computes a signal
+that nothing consumes. Here a 1x1 RGBA32F average-luminance target was written every frame, and **no pass
+bound it and no copy read it back** (`DM_NVN_COPYLOG` showed `copy_t2b` = 0 for the whole run). That is not
+"the exposure is 1.0"; it is "the exposure stage is missing from our side". The fix is to reconstruct the
+stage from the value the game itself computes, using the calibration the game itself declares:
+
+- The tone curve's static `c1` carried `1/0.18` (middle grey) and the LUT generator carried `0.18`; the
+  engine's own 1x1 read `0.7106`; `0.18/0.7106 = 0.2533`, which is exactly the hand-tuned value that looked
+  right. Three independent numbers agreeing is the confidence you need.
+- Implement it the reusable way: recognise the 1x1 RGBA32F attachment at bind time, blit 1x1 -> a 16-byte
+  shared buffer behind the frame (same trick as any present-time readback), compute `k = midgrey/avg`
+  (clamped, first-order smoothed), and rewrite the tone-mapping `c1` slot to `base*k` each time it moves.
+  Register `(buffer, offset, base)` so repeated rewrites do not compound.
+- **Make it the default** when the un-exposed path is visibly broken (median 235/255, 5.5% pure white ->
+  median 138, 0.5% with it on). Keep a kill switch (`=0`) and let an explicit manual value win.
+
+Lesson: "brightness is wrong" is rarely one bad light. Measure the HDR median vs the curve's white point
+first; if the median sits ~5x middle grey, the missing thing is a whole stage (exposure/tone), not a lamp.
