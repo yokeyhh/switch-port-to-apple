@@ -750,3 +750,27 @@ Fix:
 
 Verified: the same new-game script ran 4/4 times to the same frame with 0 failures after the change;
 before it, 1 of 3 runs aborted mid-opening.
+
+## Host code is shared by macOS and iOS — guard Mac-only Mach APIs
+
+`<mach/mach_vm.h>` (`vm_region_64`, `mach_vm_region`, `mach_vm_read_overwrite`) **does not exist in the
+iOS SDK**; the build fails with `mach_vm.h unsupported`. `<mach/mach.h>` itself is fine. The same goes
+for `proc_*`, Mac-only `sysctl` mibs, `NSWindow`/AppKit, and anything in `IOKit` you did not link for iOS.
+
+Guard **both the include and the calls**:
+
+```c
+#include <TargetConditionals.h>
+#if !TARGET_OS_IPHONE
+#include <mach/mach_vm.h>
+#endif
+...
+#if !TARGET_OS_IPHONE
+    if (vm_region_64(...) == KERN_SUCCESS) { ... }
+#endif
+```
+
+Keep the shared logic (here: the EFAULT retry) unconditional; only the extra diagnostic goes away.
+
+Rule: **rebuild the IPA after every host change.** The Mac build cannot see these; `xcodebuild` is the
+only thing that catches a new Mac-only API before it reaches a device.
