@@ -727,3 +727,26 @@ stage from the value the game itself computes, using the calibration the game it
 
 Lesson: "brightness is wrong" is rarely one bad light. Measure the HDR median vs the curve's white point
 first; if the median sits ~5x middle grey, the missing thing is a whole stage (exposure/tone), not a lamp.
+
+## EFAULT from a host `pread`/`read` into guest memory is usually a write-protect race
+
+If guest memory is write-protected for dirty-page tracking (textures: protect after upload, fault on
+game write), a **kernel** write into that page does not take the page-fault hook — `pread` just returns
+`EFAULT`. Calling an "unprotect before host write" hook once before a large read is not enough: the
+graphics thread can re-protect the page in the window between your mprotect and the kernel's copy, and
+a long read can cross a page that gets re-protected mid-copy.
+
+Symptom: intermittent guest abort with `fs pread fd 失败 errno=14`, then a `Break`/assert, and the
+process exits with the game's abort code. Re-running often passes, which is the tell.
+
+Fix:
+
+- Call the unprotect hook **before every** host syscall that writes guest memory (`read`, `pread`,
+  `recv`, `recvfrom`), not once per operation.
+- On `EFAULT`, re-unprotect and retry a bounded number of times (8, with `sched_yield`). The read is at
+  the same offset so retrying is idempotent.
+- Only after the retries fail, log the fd/path/offset/length/address plus `vm_region` protection — that
+  is what distinguishes "race" from "the guest really passed a bad pointer".
+
+Verified: the same new-game script ran 4/4 times to the same frame with 0 failures after the change;
+before it, 1 of 3 runs aborted mid-opening.
