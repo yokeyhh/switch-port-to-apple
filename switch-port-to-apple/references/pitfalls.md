@@ -804,3 +804,31 @@ Check, in order:
 Fix: turn real output on in the launcher (`DM_AUDIO=1` by default in `play.sh`) and keep the host
 default silent for tests. Also confirm each output's device callbacks show 0 underruns; a silent
 redundant output is harmless, a starving one is not.
+
+## A save that writes is not a save that loads — script the in-game round trip
+
+Host-side filesystem tests (pwrite / partial writes / transaction / commit / remount) prove the
+*engine*, not the *game flow*. Verify three separate things, in this order:
+
+1. **The UI path is reachable.** Open the menu, screenshot it. A modal hint or dialogue box may
+   swallow the menu button entirely — move a step with the stick and press back/cancel first,
+   then open the menu again.
+2. **A shortcut may exist.** The save row often advertises a button badge (e.g. `R`); pressing it
+   jumps straight to the confirmation dialog instead of walking the cursor there.
+3. **The file really changed** — compare mtime, size **and** a hash before/after (size alone hides
+   in-place rewrites), and read the host's commit line (should show the working directory swapped
+   in atomically).
+4. **Boot with the file the game just wrote** and screenshot the restored scene. Only this proves
+   read-after-write; a written save that cannot be loaded is the classic failure.
+
+Known cosmetic risk while doing this: right after a UI element (dialogue box, menu) first appears,
+some ports show the font/ui atlas tiled across the 3D scene for a second or three before it heals.
+Do not mistake it for the save failing — it is a texture-pool re-upload race, and the UI text in
+the panel stays correct.
+
+## Judge playability from the windowed path, not the offscreen test path
+
+The same scene can be smooth with a window and terrible headless: one measurement of the same
+route gave p50 33.36 ms / p95 33.68 ms windowed, but p95 ≈ 242 ms on about a quarter of frames
+with `DM_WINDOW=0`. The offscreen path exists for scripted regression runs (keys, screenshots);
+it is not what the player sees. Before writing "the room stutters", re-measure windowed.
